@@ -26,7 +26,7 @@ const typeRules = {
   phone: ['telefone', 'phone', 'celular', 'whatsapp'],
   cpf: ['cpf'],
   cnpj: ['cnpj'],
-  name: ['nome', 'name', 'fullname', 'nome-completo', 'username'],
+  name: ['nome', 'name', 'fullname', 'nome-completo', 'username', 'apelido', 'sobrenome', 'first-name', 'last-name'],
   address: ['endereco', 'endereço', 'address', 'rua', 'logradouro'],
   zipcode: ['cep', 'zipcode', 'zip']
 };
