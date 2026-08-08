@@ -5,6 +5,10 @@ let currentAllSuggestions = [];
 let currentOptionEls = [];
 let dropdownSessionId = 0;
 
+function setStyleImportant(el, prop, value) {
+  el.style.setProperty(prop, value, 'important');
+}
+
 let lastUserGestureAt = 0;
 const GESTURE_WINDOW_MS = 400;
 
@@ -160,8 +164,6 @@ function showDropdown(input, suggestions) {
     Object.assign(currentDropdown.style, {
       position: 'absolute',
       zIndex: '999999',
-      background: '#fff',
-      border: '1px solid #ccc',
       borderRadius: '6px',
       boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
       fontFamily: 'system-ui, sans-serif',
@@ -171,6 +173,10 @@ function showDropdown(input, suggestions) {
       maxHeight: '260px',
       minWidth: `${input.offsetWidth}px`
     });
+
+    setStyleImportant(currentDropdown, 'background-color', '#ffffff');
+    setStyleImportant(currentDropdown, 'color', '#1d1d1f');
+    setStyleImportant(currentDropdown, 'border', '1px solid #ccc');
 
     document.body.appendChild(currentDropdown);
   }
@@ -195,6 +201,8 @@ function showDropdown(input, suggestions) {
       cursor: 'pointer',
       borderBottom: '1px solid #f0f0f0'
     });
+    setStyleImportant(item, 'color', '#1d1d1f');
+    setStyleImportant(item, 'background-color', '#ffffff');
 
     if (suggestion.favorite) item.textContent = `★ ${suggestion.value}`;
 
@@ -210,7 +218,7 @@ function showDropdown(input, suggestions) {
 
     item.addEventListener('mouseleave', () => {
       if (currentSelectedIndex === index) {
-        item.style.background = '#fff';
+        setStyleImportant(item, 'background-color', '#ffffff');
         item.setAttribute('aria-selected', 'false');
         currentSelectedIndex = -1;
       }
@@ -226,10 +234,10 @@ function showDropdown(input, suggestions) {
     hint.textContent = `+${remaining} resultado${remaining > 1 ? 's' : ''}. Continue digitando para refinar.`;
     Object.assign(hint.style, {
       padding: '6px 10px',
-      fontSize: '11px',
-      color: '#999',
-      background: '#fafafa'
+      fontSize: '11px'
     });
+    setStyleImportant(hint, 'color', '#999999');
+    setStyleImportant(hint, 'background-color', '#fafafa');
     currentDropdown.appendChild(hint);
   }
 }
@@ -264,8 +272,10 @@ function selectSuggestion(input, suggestion) {
 function updateDropdownHighlight() {
   const items = currentOptionEls;
   for (let i = 0; i < items.length; i++) {
+    setStyleImportant(items[i], 'color', '#1d1d1f');
+
     if (i === currentSelectedIndex) {
-      items[i].style.background = '#e6f7ff';
+      setStyleImportant(items[i], 'background-color', '#e6f7ff');
       items[i].setAttribute('aria-selected', 'true');
 
       const itemTop = items[i].offsetTop;
@@ -277,7 +287,7 @@ function updateDropdownHighlight() {
         currentDropdown.scrollTop = itemBottom - currentDropdown.offsetHeight;
 
     } else {
-      items[i].style.background = '#fff';
+      setStyleImportant(items[i], 'background-color', '#ffffff');
       items[i].setAttribute('aria-selected', 'false');
     }
   }
