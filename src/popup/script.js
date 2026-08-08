@@ -33,15 +33,19 @@ let timeoutValue = undefined;
 let accountConnected = false;
 
 const getValues = () =>
-  new Promise(resolve => {
+  new Promise((resolve, reject) => {
     chrome.storage.local.get([STORAGE_KEY], result => {
+      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
       resolve(result[STORAGE_KEY] || DEFAULT_VALUES);
     });
   });
 
 const saveValues = values =>
-  new Promise(resolve => {
-    chrome.storage.local.set({ [STORAGE_KEY]: values }, resolve);
+  new Promise((resolve, reject) => {
+    chrome.storage.local.set({ [STORAGE_KEY]: values }, () => {
+      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+      resolve();
+    });
   });
 
 function showStatus(text, isError = false) {
@@ -66,21 +70,25 @@ function toggleButtonState() {
 }
 
 async function renderList() {
-  const category = categorySelect.value;
-  const values = await getValues();
-  const items = values[category] || [];
+  try {
+    const category = categorySelect.value;
+    const values = await getValues();
+    const items = values[category] || [];
 
-  if (emptyMessage) {
-    emptyMessage.style.display = items.length ? 'none' : 'block';
+    if (emptyMessage) {
+      emptyMessage.style.display = items.length ? 'none' : 'block';
+    }
+    list.innerHTML = '';
+
+    const sortedItems = [...items].sort((a, b) => (b.favorite === true) - (a.favorite === true));
+
+    sortedItems.forEach((item) => {
+      const li = createItemElement(category, item);
+      list.appendChild(li);
+    });
+  } catch (error) {
+    showStatus('Erro ao carregar dados.', true);
   }
-  list.innerHTML = '';
-
-  const sortedItems = [...items].sort((a, b) => (b.favorite === true) - (a.favorite === true));
-
-  sortedItems.forEach((item) => {
-    const li = createItemElement(category, item);
-    list.appendChild(li);
-  });
 }
 
 function createItemElement(category, item) {
@@ -125,7 +133,7 @@ function updateLiContent(li, category, item) {
   li.appendChild(actionsDiv);
 
   favBtn.addEventListener('click', () => toggleFavorite(category, item.id));
-  editBtn.addEventListener('click', () => enterEditMode(li, category, item.id, item.value));
+  editBtn.addEventListener('click', () => enterEditMode(li, category, item));
   removeBtn.addEventListener('click', () => removeValue(category, item.id, li));
 }
 
@@ -137,52 +145,63 @@ async function addValue() {
   const value = valueInput.value.trim();
   if (!value) return;
 
-  const values = await getValues();
-  if (!values[category]) values[category] = [];
+  try {
+    const values = await getValues();
+    if (!values[category]) values[category] = [];
 
-  const alreadyExists = values[category].some(item => item.value === value);
-  if (alreadyExists)
-    return showStatus('Esse valor já está salvo.', true);
+    const alreadyExists = values[category].some(item => item.value === value);
+    if (alreadyExists)
+      return showStatus('Esse valor já está salvo.', true);
 
-  const newItem = { id: generateId(), value, usageCount: 0, favorite: false };
-  values[category].unshift(newItem);
-  await saveValues(values);
+    const newItem = { id: generateId(), value, usageCount: 0, favorite: false };
+    values[category].unshift(newItem);
+    await saveValues(values);
 
-  valueInput.value = '';
-  toggleButtonState();
-  showStatus('Valor adicionado');
+    valueInput.value = '';
+    toggleButtonState();
+    showStatus('Valor adicionado');
 
-  if (emptyMessage) emptyMessage.style.display = 'none';
+    if (emptyMessage) emptyMessage.style.display = 'none';
 
-  const li = createItemElement(category, newItem);
-  li.classList.add('adding');
+    const li = createItemElement(category, newItem);
+    li.classList.add('adding');
 
-  let inserted = false;
-  for (const child of list.children) {
-    if (!child.querySelector('.fav-btn.active')) {
-      list.insertBefore(li, child);
-      inserted = true;
-      break;
+    let inserted = false;
+    for (const child of list.children) {
+      if (!child.querySelector('.fav-btn.active')) {
+        list.insertBefore(li, child);
+        inserted = true;
+        break;
+      }
     }
-  }
 
-  if (!inserted) list.appendChild(li);
+    if (!inserted) list.appendChild(li);
+  } catch (error) {
+    showStatus('Erro ao salvar valor.', true);
+  }
 }
 
 async function removeValue(category, id, liElement) {
+  if (liElement.classList.contains('removing')) return;
+  
   liElement.classList.add('removing');
 
   setTimeout(async () => {
-    const values = await getValues();
-    if (values[category]) {
-      values[category] = values[category].filter(item => item.id !== id);
-      await saveValues(values);
-    }
+    try {
+      const values = await getValues();
+      if (values[category]) {
+        values[category] = values[category].filter(item => item.id !== id);
+        await saveValues(values);
+      }
 
-    liElement.remove();
+      liElement.remove();
 
-    if (list.children.length === 0 && emptyMessage) {
-      emptyMessage.style.display = 'block';
+      if (list.children.length === 0 && emptyMessage) {
+        emptyMessage.style.display = 'block';
+      }
+    } catch (error) {
+      showStatus('Erro ao remover item.', true);
+      liElement.classList.remove('removing'); 
     }
   }, 600);
 }
@@ -220,32 +239,35 @@ function applyAccountGate() {
 }
 
 async function toggleFavorite(category, id) {
-  const values = await getValues();
-  const item = values[category]?.find(i => i.id === id);
-  if (item) {
-    item.favorite = !item.favorite;
-    await saveValues(values);
+  try {
+    const values = await getValues();
+    const item = values[category]?.find(i => i.id === id);
+    if (item) {
+      item.favorite = !item.favorite;
+      await saveValues(values);
 
-    const li = document.querySelector(`li[data-id="${id}"]`);
-    if (li && !li.classList.contains('editing')) {
-      updateLiContent(li, category, item);
+      const li = document.querySelector(`li[data-id="${id}"]`);
+      if (li && !li.classList.contains('editing')) {
+        updateLiContent(li, category, item);
 
-      if (item.favorite)
-        list.insertBefore(li, list.firstChild);
-      else list.appendChild(li);
+        if (item.favorite)
+          list.insertBefore(li, list.firstChild);
+        else list.appendChild(li);
+      }
     }
+  } catch (error) {
+    showStatus('Erro ao atualizar favorito.', true);
   }
 }
 
-function enterEditMode(li, category, id, currentValue) {
-  li.dataset.originalHTML = li.innerHTML;
+function enterEditMode(li, category, item) {
   li.classList.add('editing');
   li.innerHTML = '';
 
   const editInput = document.createElement('input');
   editInput.type = 'text';
   editInput.className = 'edit-input';
-  editInput.value = currentValue;
+  editInput.value = item.value;
   editInput.autocomplete = 'off';
 
   const actionsDiv = document.createElement('div');
@@ -270,39 +292,57 @@ function enterEditMode(li, category, id, currentValue) {
   editInput.focus();
   editInput.setSelectionRange(editInput.value.length, editInput.value.length);
 
+  let isSaving = false;
+
   const saveEdit = async () => {
+    if (isSaving) return;
+    
     const newValue = editInput.value.trim();
     if (!newValue) return;
 
-    const values = await getValues();
-    if (values[category]) {
-      const alreadyExists = values[category].some(item => item.id !== id && item.value === newValue);
-      if (alreadyExists)
-        return showStatus('Esse valor já está salvo.', true);
+    isSaving = true;
+    editInput.disabled = true;
 
-      const item = values[category].find(i => i.id === id);
-      if (item) {
-        item.value = newValue;
-        await saveValues(values);
+    try {
+      const values = await getValues();
+      if (values[category]) {
+        const alreadyExists = values[category].some(i => i.id !== item.id && i.value === newValue);
+        if (alreadyExists) {
+          isSaving = false;
+          editInput.disabled = false;
+          editInput.focus();
+          return showStatus('Esse valor já está salvo.', true);
+        }
 
-        updateLiContent(li, category, item);
-        li.classList.remove('editing');
-        showStatus('Item atualizado');
+        const storedItem = values[category].find(i => i.id === item.id);
+        if (storedItem) {
+          storedItem.value = newValue;
+          await saveValues(values);
+
+          item.value = newValue;
+          updateLiContent(li, category, storedItem);
+          li.classList.remove('editing');
+          showStatus('Item atualizado');
+        }
       }
+    } catch (error) {
+      isSaving = false;
+      editInput.disabled = false;
+      showStatus('Erro ao salvar item.', true);
     }
   };
 
+  const cancelEdit = () => {
+    updateLiContent(li, category, item);
+    li.classList.remove('editing');
+  };
+
   saveBtn.addEventListener('click', saveEdit);
+  cancelBtn.addEventListener('click', cancelEdit);
+  
   editInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') saveEdit();
-    if (e.key === 'Escape') {
-      li.innerHTML = li.dataset.originalHTML;
-      li.classList.remove('editing');
-    }
-  });
-  cancelBtn.addEventListener('click', () => {
-    li.innerHTML = li.dataset.originalHTML;
-    li.classList.remove('editing');
+    if (e.key === 'Escape') cancelEdit();
   });
 }
 
@@ -330,9 +370,10 @@ if (categorySelect) {
 if (addButton)
   addButton.addEventListener('click', addValue);
 
-
 if (valueInput) {
-  valueInput.addEventListener('keydown', e => e.key === 'Enter' && addValue());
+  valueInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') addValue();
+  });
   valueInput.addEventListener('input', toggleButtonState);
 }
 
