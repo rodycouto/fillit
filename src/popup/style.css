@@ -117,3 +117,12 @@ button {
   margin-top: 8px;
   min-height: 14px;
 }
+
+#profile-info {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+  font-size: 11px;
+  color: #999;
+  text-align: center;
+}

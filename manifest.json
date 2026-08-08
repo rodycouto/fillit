@@ -6,7 +6,10 @@
     "permissions": [
         "storage",
         "activeTab",
-        "scripting"
+        "scripting",
+        "contextMenus",
+        "identity",
+        "identity.email"
     ],
     "action": {
         "default_popup": "src/popup/popup.html",
