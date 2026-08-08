@@ -130,10 +130,8 @@ function updateLiContent(li, category, item) {
 }
 
 async function addValue() {
-  if (!accountConnected) {
-    showStatus('Conecte uma conta Google a este perfil do Chrome para adicionar itens.', true);
-    return;
-  }
+  if (!accountConnected)
+    return showStatus('Conecte uma conta Google a este perfil do Chrome para adicionar itens.', true);
 
   const category = categorySelect.value;
   const value = valueInput.value.trim();
@@ -143,10 +141,8 @@ async function addValue() {
   if (!values[category]) values[category] = [];
 
   const alreadyExists = values[category].some(item => item.value === value);
-  if (alreadyExists) {
-    showStatus('Esse valor já está salvo.', true);
-    return;
-  }
+  if (alreadyExists)
+    return showStatus('Esse valor já está salvo.', true);
 
   const newItem = { id: generateId(), value, usageCount: 0, favorite: false };
   values[category].unshift(newItem);
@@ -156,12 +152,21 @@ async function addValue() {
   toggleButtonState();
   showStatus('Valor adicionado');
 
-  await renderList();
+  if (emptyMessage) emptyMessage.style.display = 'none';
 
-  const firstLi = list.firstElementChild;
-  if (firstLi) {
-    firstLi.classList.add('adding');
+  const li = createItemElement(category, newItem);
+  li.classList.add('adding');
+
+  let inserted = false;
+  for (const child of list.children) {
+    if (!child.querySelector('.fav-btn.active')) {
+      list.insertBefore(li, child);
+      inserted = true;
+      break;
+    }
   }
+
+  if (!inserted) list.appendChild(li);
 }
 
 async function removeValue(category, id, liElement) {
@@ -173,7 +178,12 @@ async function removeValue(category, id, liElement) {
       values[category] = values[category].filter(item => item.id !== id);
       await saveValues(values);
     }
-    renderList();
+
+    liElement.remove();
+
+    if (list.children.length === 0 && emptyMessage) {
+      emptyMessage.style.display = 'block';
+    }
   }, 600);
 }
 
@@ -215,7 +225,15 @@ async function toggleFavorite(category, id) {
   if (item) {
     item.favorite = !item.favorite;
     await saveValues(values);
-    renderList();
+
+    const li = document.querySelector(`li[data-id="${id}"]`);
+    if (li && !li.classList.contains('editing')) {
+      updateLiContent(li, category, item);
+
+      if (item.favorite)
+        list.insertBefore(li, list.firstChild);
+      else list.appendChild(li);
+    }
   }
 }
 
