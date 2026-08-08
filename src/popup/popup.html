@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Fillit</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <h1><img src="../../icons/icon16.png" alt="Fillit logo" class="logo"> Fillit</h1>
+
+  <label for="category">Novo</label>
+  <select id="category">
+    <option value="email">Email</option>
+    <option value="phone">Telefone</option>
+    <option value="name">Nome</option>
+    <option value="cpf">CPF</option>
+    <option value="cnpj">CNPJ</option>
+    <option value="address">Endereço</option>
+    <option value="zipcode">CEP</option>
+  </select>
+
+  <div class="add-row">
+    <input type="text" id="value" placeholder="Digite o valor e adicione">
+    <button id="add-button">Adicionar</button>
+  </div>
+
+  <ul id="list"></ul>
+  <div id="empty-message">Categoria vazia.</div>
+  <div id="status"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
