@@ -9,6 +9,8 @@ const emptyMessage = document.getElementById('empty-message');
 const status = document.getElementById('status');
 const profileInfo = document.getElementById('profile-info');
 
+let timeoutValue = undefined;
+
 const getValues = () =>
   new Promise(resolve => {
     chrome.storage.local.get([STORAGE_KEY], result => {
@@ -23,22 +25,42 @@ const saveValues = values =>
 
 function showStatus(text, isError = false) {
   status.textContent = text;
-  status.style.color = isError ? '#dc2626' : '#16a34a';
-  setTimeout(() => status.textContent = '', 2000);
+  status.style.color = isError ? 'var(--danger)' : 'var(--success)';
+  
+  status.classList.add('show');
+  
+  if (setTimeout) clearTimeout(timeoutValue);
+  timeoutValue = setTimeout(() => {
+    status.classList.remove('show');
+    timeoutValue = undefined;
+    setTimeout(() => status.textContent = '', 300);
+  }, 4000); 
 }
 
-async function renderList() {
+function toggleButtonState() {
+  if (valueInput.value.trim() === '')
+    addButton.disabled = true;
+  else addButton.disabled = false;
+}
+
+async function renderList(animateLast = false) {
   const category = categorySelect.value;
   const values = await getValues();
   const items = values[category] || [];
 
-  list.innerHTML = '';
   emptyMessage.style.display = items.length ? 'none' : 'block';
+  list.innerHTML = '';
 
   items.forEach((item, index) => {
     const li = document.createElement('li');
+    
+    if (animateLast && index === items.length - 1)
+      li.classList.add('adding');
+
     li.innerHTML = `<span>${item}</span><button title="Remove">✕</button>`;
-    li.querySelector('button').addEventListener('click', () => removeValue(category, index));
+    
+    li.querySelector('button').addEventListener('click', () => removeValue(category, index, li));
+    
     list.appendChild(li);
   });
 }
@@ -58,17 +80,23 @@ async function addValue() {
 
   values[category].push(value);
   await saveValues(values);
+  
   valueInput.value = '';
-  showStatus('Valor adicionado!');
-  renderList();
+  toggleButtonState(); 
+  
+  showStatus('Valor adicionado');
+  renderList(true);
 }
 
-async function removeValue(category, index) {
-  const values = await getValues();
-  values[category].splice(index, 1);
-  await saveValues(values);
-  showStatus('Valor removido.');
-  renderList();
+async function removeValue(category, index, liElement) {
+  liElement.classList.add('removing');
+
+  setTimeout(async () => {
+    const values = await getValues();
+    values[category].splice(index, 1);
+    await saveValues(values);
+    renderList();
+  }, 300);
 }
 
 async function showProfileInfo() {
@@ -82,9 +110,27 @@ async function showProfileInfo() {
   }
 }
 
+categorySelect.addEventListener('wheel', e => {
+  e.preventDefault();
+  const direction = e.deltaY > 0 ? 1 : -1;
+  let newIndex = categorySelect.selectedIndex + direction;
+
+  if (newIndex >= categorySelect.options.length)
+    newIndex = 0;
+  else if (newIndex < 0)
+    newIndex = categorySelect.options.length - 1;
+
+
+  categorySelect.selectedIndex = newIndex;
+  categorySelect.dispatchEvent(new Event('change'));
+}, { passive: false });
+
+
 addButton.addEventListener('click', addValue);
 valueInput.addEventListener('keydown', e => e.key === 'Enter' && addValue());
-categorySelect.addEventListener('change', renderList);
+valueInput.addEventListener('input', toggleButtonState);
+categorySelect.addEventListener('change', () => renderList()); 
 
 renderList();
 showProfileInfo();
+toggleButtonState();

@@ -1,89 +1,172 @@
-body {
-  width: 300px;
-  font-family: system-ui, sans-serif;
-  padding: 12px;
-  margin: 0;
-  color: #222;
+:root {
+  --bg-color: #ffffff;
+  --bg-secondary: #f2f2f7; 
+  --text-primary: #1d1d1f;
+  --text-secondary: #86868b;
+  --border-color: #e5e5ea;
+  --apple-blue: #007aff;
+  --apple-blue-hover: #0066cc;
+  --danger: #ff3b30;
+  --success: #34c759;
 }
 
-h1 {
-  font-size: 16px;
-  margin: 0 0 12px 0;
+body {
+  width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  padding: 16px;
+  margin: 0;
+  color: var(--text-primary);
+  background-color: var(--bg-color);
+  -webkit-font-smoothing: antialiased;
+}
+
+header {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  margin-bottom: 20px;
+}
+
+header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.5px;
 }
 
 .logo {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
 }
 
-label {
-  display: block;
-  font-size: 12px;
-  color: #555;
-  margin-top: 10px;
+/* Card principal com curvas bem suaves e circulares */
+.input-card {
+  background: var(--bg-secondary);
+  border-radius: 28px; 
+  padding: 14px;
+  margin-bottom: 16px;
 }
 
-select, input {
+.select-wrapper {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.select-wrapper::after {
+  content: '▾';
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+  font-size: 14px;
+}
+
+/* Campos em formato de pílula circular */
+select {
   width: 100%;
-  padding: 6px;
-  box-sizing: border-box;
-  margin-top: 2px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 13px;
+  padding: 11px 16px;
+  appearance: none;
+  background-color: var(--bg-color);
+  border: 1px solid var(--bg-color);
+  border-radius: 50px; 
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: all 0.2s;
 }
 
 .add-row {
   display: flex;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 8px;
 }
 
-.add-row input {
+input {
   flex: 1;
-  margin-top: 0;
+  padding: 11px 16px;
+  border: 1px solid var(--bg-color);
+  border-radius: 50px; /* Circular estilo iOS */
+  font-size: 14px;
+  background-color: var(--bg-color);
+  outline: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: all 0.2s;
+}
+
+input::placeholder {
+  color: var(--text-secondary);
+}
+
+select:focus, input:focus {
+  border-color: var(--apple-blue);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
 }
 
 button {
-  padding: 6px 10px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-#add-button {
-  background: #4f46e5;
+  background: var(--apple-blue);
   color: white;
-  white-space: nowrap;
+  border: none;
+  border-radius: 50px; /* Botão circular em pílula */
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s, color 0.2s;
 }
 
-#add-button:hover {
-  background: #4338ca;
+button:disabled {
+  background: var(--border-color);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  background: var(--apple-blue-hover);
+}
+
+button:not(:disabled):active {
+  transform: scale(0.96); 
 }
 
 #list {
   list-style: none;
   padding: 0;
-  margin: 10px 0 0 0;
-  max-height: 160px;
+  margin: 0;
+  max-height: 180px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
+#list::-webkit-scrollbar {
+  width: 4px;
+}
+#list::-webkit-scrollbar-thumb {
+  background: #d1d1d6;
+  border-radius: 4px;
+}
+
+/* Itens da lista totalmente circulares (pílulas) */
 #list li {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 8px;
-  background: #f7f7f8;
-  border-radius: 4px;
-  margin-bottom: 4px;
-  font-size: 13px;
+  padding: 11px 16px;
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 50px; 
+  margin-bottom: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+#list li:hover {
+  border-color: #c7c7cc;
 }
 
 #list li span {
@@ -94,35 +177,93 @@ button {
 
 #list li button {
   background: transparent;
-  color: #999;
-  padding: 0 4px;
-  font-size: 14px;
-  line-height: 1;
+  color: var(--text-secondary);
+  padding: 4px;
+  font-size: 16px;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, background 0.2s;
 }
 
 #list li button:hover {
-  color: #dc2626;
+  color: var(--danger);
+  background: rgba(255, 59, 48, 0.1);
+  transform: none; 
+}
+
+.adding {
+  animation: slideIn 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.removing {
+  animation: slideOut 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes slideOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    max-height: 50px;
+    margin-bottom: 8px;
+    padding: 11px 16px;
+    border-width: 1px;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+    max-height: 0;
+    margin-bottom: 0;
+    padding: 0 16px;
+    border-width: 0;
+    overflow: hidden;
+  }
 }
 
 #empty-message {
-  font-size: 12px;
-  color: #999;
-  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
   text-align: center;
+  margin: 16px 0;
 }
 
 #status {
-  font-size: 11px;
-  color: #16a34a;
-  margin-top: 8px;
-  min-height: 14px;
+  font-size: 12px;
+  color: var(--success);
+  text-align: center;
+  font-weight: 500;
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+#status.show {
+  max-height: 20px;
+  opacity: 1;
+  margin-top: 12px;
 }
 
 #profile-info {
   margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px solid #eee;
   font-size: 11px;
-  color: #999;
+  color: var(--text-secondary);
   text-align: center;
+  line-height: 1.4;
 }
