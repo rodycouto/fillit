@@ -1,6 +1,7 @@
 let currentDropdown = null;
 let currentDropdownInput = null;
 let currentSelectedIndex = -1;
+let currentAllSuggestions = [];
 
 const typeRules = {
   email: ['email', 'e-mail', 'correio'],
@@ -81,31 +82,44 @@ function findContextualText(input) {
 }
 
 function showDropdown(input, suggestions) {
-  removeDropdown();
+  let dropdown = currentDropdown;
+
+  if (!dropdown) {
+    dropdown = document.createElement('div');
+    dropdown.id = 'fillit-dropdown';
+    dropdown.setAttribute('role', 'listbox');
+
+    Object.assign(dropdown.style, {
+      position: 'absolute',
+      zIndex: '999999',
+      background: '#fff',
+      border: '1px solid #ccc',
+      borderRadius: '6px',
+      boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '13px',
+      overflowX: 'hidden',
+      overflowY: 'auto',
+      maxHeight: '250px',
+      minWidth: `${input.offsetWidth}px`
+    });
+
+    document.body.appendChild(dropdown);
+    currentDropdown = dropdown;
+    currentDropdownInput = input;
+
+    input.addEventListener('keydown', handleKeyboardNavigation);
+  }
+
+  dropdown.innerHTML = '';
   currentSelectedIndex = -1;
 
-  const dropdown = document.createElement('div');
-  dropdown.id = 'fillit-dropdown';
-  dropdown.setAttribute('role', 'listbox');
+  repositionDropdown();
 
-  Object.assign(dropdown.style, {
-    position: 'absolute',
-    zIndex: '999999',
-    background: '#fff',
-    border: '1px solid #ccc',
-    borderRadius: '6px',
-    boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
-    fontFamily: 'system-ui, sans-serif',
-    fontSize: '13px',
-    overflow: 'hidden',
-    minWidth: `${input.offsetWidth}px`
-  });
+  const MAX_ITEMS = 100;
+  const itemsToRender = suggestions.slice(0, MAX_ITEMS);
 
-  const rect = input.getBoundingClientRect();
-  dropdown.style.top = `${window.scrollY + rect.bottom + 4}px`;
-  dropdown.style.left = `${window.scrollX + rect.left}px`;
-
-  suggestions.forEach((value, index) => {
+  itemsToRender.forEach((value, index) => {
     const item = document.createElement('div');
     item.textContent = value;
     item.setAttribute('role', 'option');
@@ -138,12 +152,6 @@ function showDropdown(input, suggestions) {
 
     dropdown.appendChild(item);
   });
-
-  document.body.appendChild(dropdown);
-  currentDropdown = dropdown;
-  currentDropdownInput = input;
-
-  input.addEventListener('keydown', handleKeyboardNavigation);
 }
 
 function updateDropdownHighlight(dropdown) {
@@ -152,6 +160,15 @@ function updateDropdownHighlight(dropdown) {
     if (i === currentSelectedIndex) {
       items[i].style.background = '#e6f7ff';
       items[i].setAttribute('aria-selected', 'true');
+
+      const itemTop = items[i].offsetTop;
+      const itemBottom = itemTop + items[i].offsetHeight;
+
+      if (itemTop < dropdown.scrollTop)
+        dropdown.scrollTop = itemTop;
+      else if (itemBottom > dropdown.scrollTop + dropdown.offsetHeight)
+        dropdown.scrollTop = itemBottom - dropdown.offsetHeight;
+
     } else {
       items[i].style.background = '#fff';
       items[i].setAttribute('aria-selected', 'false');
@@ -163,6 +180,7 @@ function handleKeyboardNavigation(e) {
   if (!currentDropdown) return;
 
   const items = currentDropdown.children;
+  if (items.length === 0) return;
 
   if (e.key === 'ArrowDown') {
     e.preventDefault();
@@ -178,10 +196,8 @@ function handleKeyboardNavigation(e) {
       fillField(currentDropdownInput, items[currentSelectedIndex].textContent);
       removeDropdown();
     }
-  }
-  else
-    if (e.key === 'Escape')
-      removeDropdown();
+  } else if (e.key === 'Escape')
+    removeDropdown();
 
 }
 
@@ -207,6 +223,7 @@ function repositionDropdown() {
     return;
   }
 
+  currentDropdown.style.minWidth = `${currentDropdownInput.offsetWidth}px`;
   currentDropdown.style.top = `${window.scrollY + rect.bottom + 4}px`;
   currentDropdown.style.left = `${window.scrollX + rect.left}px`;
 }
@@ -233,6 +250,18 @@ function getDeepActiveElement(root = document) {
   return active;
 }
 
+document.addEventListener('input', (e) => {
+  if (currentDropdownInput && e.target === currentDropdownInput) {
+    const query = e.target.value.toLowerCase();
+
+    const filtered = currentAllSuggestions.filter(suggestion => suggestion.toLowerCase().includes(query));
+
+    if (filtered.length > 0)
+      showDropdown(currentDropdownInput, filtered);
+    else removeDropdown();
+  }
+});
+
 document.addEventListener('focusin', async (e) => {
   const input = getDeepActiveElement() || e.target;
 
@@ -253,16 +282,22 @@ document.addEventListener('focusin', async (e) => {
       let allSuggestions = [];
 
       types.forEach(type => {
-        if (fillitValues[type] && fillitValues[type].length > 0)
+        if (fillitValues[type] && fillitValues[type].length > 0) {
           allSuggestions = allSuggestions.concat(fillitValues[type]);
-
+        }
       });
 
-      allSuggestions = [...new Set(allSuggestions)];
+      currentAllSuggestions = [...new Set(allSuggestions)];
 
-      if (allSuggestions.length > 0)
-        showDropdown(input, allSuggestions);
+      if (currentAllSuggestions.length > 0) {
+        const query = input.value.toLowerCase();
+        const filtered = currentAllSuggestions.filter(val =>
+          val.toLowerCase().includes(query)
+        );
 
+        if (filtered.length > 0)
+          showDropdown(input, filtered);
+      }
     });
   } catch (error) {
     console.log('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
