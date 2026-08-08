@@ -6,7 +6,7 @@ const typeRules = {
   phone: ['telefone', 'tel', 'phone', 'celular', 'whatsapp'],
   cpf: ['cpf'],
   cnpj: ['cnpj'],
-  name: ['nome', 'name', 'fullname', 'nome-completo'],
+  name: ['nome', 'name', 'fullname', 'nome-completo', 'username'],
   address: ['endereco', 'endereço', 'address', 'rua', 'logradouro'],
   zipcode: ['cep', 'zipcode', 'zip']
 };
@@ -14,7 +14,6 @@ const typeRules = {
 function identifyFieldType(input) {
 
   if (input.type === 'email') return 'email';
-  if (input.type === 'tel') return 'phone';
 
   const autocomplete = (input.autocomplete || '').toLowerCase();
   const parts = [
@@ -110,7 +109,6 @@ function showDropdown(input, suggestions) {
       borderBottom: '1px solid #f0f0f0'
     });
     item.addEventListener('mousedown', (e) => {
-      // mousedown instead of click, so it fires before focusout removes the dropdown
       e.preventDefault();
       fillField(input, value);
       removeDropdown();
@@ -133,15 +131,11 @@ function removeDropdown() {
   }
 }
 
-// Instead of closing the dropdown on scroll, reposition it alongside the
-// field, since automatic scrolling (the browser bringing the field into
-// view on focus) shouldn't close the dropdown
 function repositionDropdown() {
   if (!currentDropdown || !currentDropdownInput) return;
 
   const rect = currentDropdownInput.getBoundingClientRect();
 
-  // If the field left the viewport entirely, close the dropdown for real
   const isOffscreen = rect.bottom < 0 || rect.top > window.innerHeight;
   if (isOffscreen) {
     removeDropdown();
@@ -187,7 +181,7 @@ document.addEventListener('focusin', async (e) => {
         showDropdown(input, suggestions);
     });
   } catch (error) {
-    console.warn('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
+    console.log('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
   }
 });
 

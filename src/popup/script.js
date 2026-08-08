@@ -7,6 +7,7 @@ const addButton = document.getElementById('add-button');
 const list = document.getElementById('list');
 const emptyMessage = document.getElementById('empty-message');
 const status = document.getElementById('status');
+const profileInfo = document.getElementById('profile-info');
 
 const getValues = () =>
   new Promise(resolve => {
@@ -70,8 +71,20 @@ async function removeValue(category, index) {
   renderList();
 }
 
+async function showProfileInfo() {
+  try {
+    const userInfo = await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' });
+    profileInfo.textContent = userInfo.email
+      ? `Dados do perfil ${userInfo.email}`  
+      : 'Nenhum dado será salvo, pois nenhuma conta Google está conectada a este perfil do Chrome.';
+  } catch (error) {
+    profileInfo.textContent = 'Conecte uma conta Google para salvar os dados neste perfil do Chrome.';
+  }
+}
+
 addButton.addEventListener('click', addValue);
 valueInput.addEventListener('keydown', e => e.key === 'Enter' && addValue());
 categorySelect.addEventListener('change', renderList);
 
 renderList();
+showProfileInfo();
