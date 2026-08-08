@@ -2,14 +2,22 @@ const STORAGE_KEY = 'fillit_values';
 const LEGACY_USAGE_COUNTS_KEY = 'fillit_usage_counts';
 const ACCOUNT_STATUS_KEY = 'fillit_account_connected';
 
+const DEBUG = false;
+
+function generateId() {
+    if (crypto.randomUUID)
+        return crypto.randomUUID();
+    else `id-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 const CATEGORIES = {
-  email: 'Email',
-  phone: 'Telefone',
-  name: 'Nome',
-  cpf: 'CPF',
-  cnpj: 'CNPJ',
-  address: 'Endereço',
-  zipcode: 'CEP'
+    email: 'Email',
+    phone: 'Telefone',
+    name: 'Nome',
+    cpf: 'CPF',
+    cnpj: 'CNPJ',
+    address: 'Endereço',
+    zipcode: 'CEP'
 };
 
 async function updateAccountStatus() {
@@ -48,6 +56,7 @@ chrome.runtime.onInstalled.addListener(async details => {
 });
 
 async function logStorage() {
+    if (!DEBUG) return;
     const storage = await chrome.storage.local.get([STORAGE_KEY]);
     console.log(storage);
 }
@@ -78,23 +87,27 @@ async function migrateStorage() {
         values[category] = (values[category] || []).map(item => {
             if (typeof item === 'string') {
                 changed = true;
-                return { value: item, usageCount: legacyCounts[item] || 0, favorite: false };
+                return { id: generateId(), value: item, usageCount: legacyCounts[item] || 0, favorite: false };
             }
-            if (item.favorite === undefined) {
+
+            let migrated = item;
+            if (migrated.favorite === undefined) {
                 changed = true;
-                return { ...item, favorite: false };
+                migrated = { ...migrated, favorite: false };
             }
-            return item;
+            if (!migrated.id) {
+                changed = true;
+                migrated = { ...migrated, id: generateId() };
+            }
+            return migrated;
         });
     });
 
-    if (changed) {
+    if (changed)
         await chrome.storage.local.set({ [STORAGE_KEY]: values });
-    }
 
-    if (result[LEGACY_USAGE_COUNTS_KEY]) {
+    if (result[LEGACY_USAGE_COUNTS_KEY])
         await chrome.storage.local.remove(LEGACY_USAGE_COUNTS_KEY);
-    }
 }
 
 function createContextMenu() {
@@ -133,6 +146,6 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
     const alreadyExists = values[category].some(item => item.value === value);
     if (alreadyExists) return;
 
-    values[category].push({ value, usageCount: 0, favorite: false });
+    values[category].push({ id: generateId(), value, usageCount: 0, favorite: false });
     await chrome.storage.local.set({ [STORAGE_KEY]: values });
 });

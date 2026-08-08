@@ -2,6 +2,8 @@ let currentDropdown = null;
 let currentDropdownInput = null;
 let currentSelectedIndex = -1;
 let currentAllSuggestions = [];
+let currentOptionEls = [];
+let dropdownSessionId = 0;
 
 let lastUserGestureAt = 0;
 const GESTURE_WINDOW_MS = 400;
@@ -32,6 +34,15 @@ function normalizeText(text) {
     .replace(/[\u0300-\u036f]/g, ''); 
 }
 
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function containsKeyword(haystack, keyword) {
+  const pattern = new RegExp(`(^|[^a-z0-9])${escapeRegExp(keyword)}([^a-z0-9]|$)`);
+  return pattern.test(haystack);
+}
+
 function identifyFieldTypes(input) {
   const matchedTypes = new Set();
 
@@ -51,18 +62,16 @@ function identifyFieldTypes(input) {
       .join(' ')
   );
 
-  for (const [fieldType, keywords] of Object.entries(typeRules)) {
-    if (keywords.some(keyword => parts.includes(normalizeText(keyword)))) {
+  for (const [fieldType, keywords] of Object.entries(typeRules))
+    if (keywords.some(keyword => containsKeyword(parts, normalizeText(keyword))))
       matchedTypes.add(fieldType);
-    }
-  }
 
   return Array.from(matchedTypes);
 }
 
 function findLabelAssociated(input) {
   if (input.id) {
-    const label = document.querySelector(`label[for="${input.id}"]`);
+    const label = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
     if (label) return label.textContent;
   }
   const labelFather = input.closest('label');
@@ -112,7 +121,9 @@ function incrementUsageCount(suggestion) {
     const items = fillitValues[suggestion.category];
     if (!items) return;
 
-    const target = items.find(item => item.value === suggestion.value);
+    const target = suggestion.id
+      ? items.find(item => item.id === suggestion.id)
+      : items.find(item => item.value === suggestion.value);
     if (!target) return;
 
     target.usageCount = (target.usageCount || 0) + 1;
@@ -146,6 +157,7 @@ function showDropdown(input, suggestions) {
 
   currentDropdown.innerHTML = '';
   currentSelectedIndex = -1;
+  currentOptionEls = [];
 
   repositionDropdown();
 
@@ -173,7 +185,7 @@ function showDropdown(input, suggestions) {
 
     item.addEventListener('mouseenter', () => {
       currentSelectedIndex = index;
-      updateDropdownHighlight(currentDropdown);
+      updateDropdownHighlight();
     });
 
     item.addEventListener('mouseleave', () => {
@@ -185,6 +197,7 @@ function showDropdown(input, suggestions) {
     });
 
     currentDropdown.appendChild(item);
+    currentOptionEls.push(item);
   });
 
   const remaining = suggestions.length - itemsToRender.length;
@@ -217,7 +230,9 @@ function closeDropdown() {
   }
 
   currentAllSuggestions = [];
+  currentOptionEls = [];
   currentSelectedIndex = -1;
+  dropdownSessionId++;
 }
 
 function selectSuggestion(input, suggestion) {
@@ -226,8 +241,8 @@ function selectSuggestion(input, suggestion) {
   closeDropdown();
 }
 
-function updateDropdownHighlight(dropdown) {
-  const items = dropdown.children;
+function updateDropdownHighlight() {
+  const items = currentOptionEls;
   for (let i = 0; i < items.length; i++) {
     if (i === currentSelectedIndex) {
       items[i].style.background = '#e6f7ff';
@@ -236,10 +251,10 @@ function updateDropdownHighlight(dropdown) {
       const itemTop = items[i].offsetTop;
       const itemBottom = itemTop + items[i].offsetHeight;
 
-      if (itemTop < dropdown.scrollTop)
-        dropdown.scrollTop = itemTop;
-      else if (itemBottom > dropdown.scrollTop + dropdown.offsetHeight)
-        dropdown.scrollTop = itemBottom - dropdown.offsetHeight;
+      if (itemTop < currentDropdown.scrollTop)
+        currentDropdown.scrollTop = itemTop;
+      else if (itemBottom > currentDropdown.scrollTop + currentDropdown.offsetHeight)
+        currentDropdown.scrollTop = itemBottom - currentDropdown.offsetHeight;
 
     } else {
       items[i].style.background = '#fff';
@@ -251,17 +266,17 @@ function updateDropdownHighlight(dropdown) {
 function handleKeyboardNavigation(e) {
   if (!currentDropdown) return;
 
-  const items = currentDropdown.children;
+  const items = currentOptionEls;
   if (items.length === 0) return;
 
   if (e.key === 'ArrowDown') {
     e.preventDefault();
     currentSelectedIndex = (currentSelectedIndex + 1) % items.length;
-    updateDropdownHighlight(currentDropdown);
+    updateDropdownHighlight();
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
     currentSelectedIndex = (currentSelectedIndex - 1 + items.length) % items.length;
-    updateDropdownHighlight(currentDropdown);
+    updateDropdownHighlight();
   } else if (e.key === 'Enter') {
     if (currentSelectedIndex >= 0) {
       e.preventDefault();
@@ -296,8 +311,8 @@ function fillField(input, value) {
     .set
     .call(input, value);
 
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
+  input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 }
 
 function getDeepActiveElement(root = document) {
@@ -325,7 +340,7 @@ document.addEventListener('focusin', async (e) => {
   const input = getDeepActiveElement() || e.target;
 
   if (!input || !['INPUT', 'TEXTAREA'].includes(input.tagName)) return;
-  if (input.tagName === 'INPUT' && ['button', 'submit', 'checkbox', 'radio', 'file', 'hidden'].includes(input.type)) return;
+  if (input.tagName === 'INPUT' && ['button', 'submit', 'checkbox', 'radio', 'file', 'hidden', 'password'].includes(input.type)) return;
 
   const isUserInitiated = (Date.now() - lastUserGestureAt) < GESTURE_WINDOW_MS;
   if (!isUserInitiated) return;
@@ -333,10 +348,8 @@ document.addEventListener('focusin', async (e) => {
   const types = identifyFieldTypes(input);
   if (!types || types.length === 0) return;
 
-  if (!chrome.runtime?.id) {
-    console.log('Fillit: extension context invalidated. Refresh the page (F5) to reconnect.');
-    return;
-  }
+  if (!chrome.runtime?.id)
+    return console.log('Fillit: extension context invalidated. Refresh the page (F5) to reconnect.');
 
   try {
     chrome.storage.local.get(['fillit_values', 'fillit_account_connected'], (result) => {
@@ -366,6 +379,7 @@ document.addEventListener('focusin', async (e) => {
       currentAllSuggestions = uniqueSuggestions;
 
       if (currentAllSuggestions.length > 0) {
+        dropdownSessionId++;
         currentDropdownInput = input;
         input.addEventListener('keydown', handleKeyboardNavigation);
         showDropdown(input, currentAllSuggestions);
@@ -376,5 +390,10 @@ document.addEventListener('focusin', async (e) => {
   }
 });
 
-document.addEventListener('focusout', () => setTimeout(closeDropdown, 50));
+document.addEventListener('focusout', () => {
+  const sessionAtBlur = dropdownSessionId;
+  setTimeout(() => {
+    if (dropdownSessionId === sessionAtBlur) closeDropdown();
+  }, 50);
+});
 document.addEventListener('scroll', repositionDropdown, true);
