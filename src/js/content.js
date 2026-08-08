@@ -3,9 +3,31 @@ let currentDropdownInput = null;
 let currentSelectedIndex = -1;
 let currentAllSuggestions = [];
 
+// Change 1 (privacy): the dropdown must only ever open in response to a
+// real user gesture (a click, or Tab-key navigation) on the field — never
+// on page load, never from a site auto-focusing a field via the
+// "autofocus" attribute or a script calling .focus() programmatically.
+// We track the timestamp of the last real gesture and require a recent
+// one before treating a "focusin" event as legitimate.
+let lastUserGestureAt = 0;
+const GESTURE_WINDOW_MS = 400;
+
+function markUserGesture() {
+  lastUserGestureAt = Date.now();
+}
+
+document.addEventListener('pointerdown', markUserGesture, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') markUserGesture();
+}, true);
+
 const typeRules = {
   email: ['email', 'e-mail', 'correio'],
-  phone: ['telefone', 'tel', 'phone', 'celular', 'whatsapp'],
+  // 'tel' was removed on purpose: as a 3-letter fragment it matched
+  // unrelated words like "hotel", "detail", "intel", producing false
+  // positives. 'telefone', 'phone', 'celular', 'whatsapp' already cover
+  // real phone fields, and input.type === 'tel' is handled separately.
+  phone: ['telefone', 'phone', 'celular', 'whatsapp'],
   cpf: ['cpf'],
   cnpj: ['cnpj'],
   name: ['nome', 'name', 'fullname', 'nome-completo', 'username'],
@@ -13,25 +35,34 @@ const typeRules = {
   zipcode: ['cep', 'zipcode', 'zip']
 };
 
+function normalizeText(text) {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // strip accents, so "sao" matches "São"
+}
+
 function identifyFieldTypes(input) {
   const matchedTypes = new Set();
 
   if (input.type === 'email') matchedTypes.add('email');
+  if (input.type === 'tel') matchedTypes.add('phone');
 
   const autocomplete = (input.autocomplete || '').toLowerCase();
-  const parts = [
-    input.name,
-    input.id,
-    input.placeholder,
-    autocomplete,
-    findContextualText(input)
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+  const parts = normalizeText(
+    [
+      input.name,
+      input.id,
+      input.placeholder,
+      autocomplete,
+      findContextualText(input)
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
 
   for (const [fieldType, keywords] of Object.entries(typeRules)) {
-    if (keywords.some(keyword => parts.includes(keyword))) {
+    if (keywords.some(keyword => parts.includes(normalizeText(keyword)))) {
       matchedTypes.add(fieldType);
     }
   }
@@ -83,25 +114,37 @@ function findContextualText(input) {
   return text.filter(Boolean).join(' ');
 }
 
-function incrementUsageCount(value) {
-  if (!chrome.runtime?.id) return;
+// Change 3: usage count now lives inside the item itself (fillit_values),
+// not in a separate store. We know which category the item belongs to
+// because each suggestion object carries its own `category`, attached
+// when the suggestions were merged in the focusin handler.
+function incrementUsageCount(suggestion) {
+  if (!chrome.runtime?.id || !suggestion?.category) return;
 
-  chrome.storage.local.get(['fillit_usage_counts'], (result) => {
-    const counts = result.fillit_usage_counts || {};
-    counts[value] = (counts[value] || 0) + 1;
-    chrome.storage.local.set({ fillit_usage_counts: counts });
+  chrome.storage.local.get(['fillit_values'], (result) => {
+    const fillitValues = result.fillit_values || {};
+    const items = fillitValues[suggestion.category];
+    if (!items) return;
+
+    const target = items.find(item => item.value === suggestion.value);
+    if (!target) return;
+
+    target.usageCount = (target.usageCount || 0) + 1;
+    chrome.storage.local.set({ fillit_values: fillitValues });
   });
 }
 
+// Creates (or reuses) the dropdown's DOM element and positions it next to
+// the field. Does NOT touch currentDropdownInput or the keydown listener
+// lifecycle — those are managed separately so a temporary empty-results
+// state doesn't tear down the ability to keep typing and filtering.
 function showDropdown(input, suggestions) {
-  let dropdown = currentDropdown;
+  if (!currentDropdown) {
+    currentDropdown = document.createElement('div');
+    currentDropdown.id = 'fillit-dropdown';
+    currentDropdown.setAttribute('role', 'listbox');
 
-  if (!dropdown) {
-    dropdown = document.createElement('div');
-    dropdown.id = 'fillit-dropdown';
-    dropdown.setAttribute('role', 'listbox');
-
-    Object.assign(dropdown.style, {
+    Object.assign(currentDropdown.style, {
       position: 'absolute',
       zIndex: '999999',
       background: '#fff',
@@ -112,18 +155,14 @@ function showDropdown(input, suggestions) {
       fontSize: '13px',
       overflowX: 'hidden',
       overflowY: 'auto',
-      maxHeight: '250px',
+      maxHeight: '260px',
       minWidth: `${input.offsetWidth}px`
     });
 
-    document.body.appendChild(dropdown);
-    currentDropdown = dropdown;
-    currentDropdownInput = input;
-
-    input.addEventListener('keydown', handleKeyboardNavigation);
+    document.body.appendChild(currentDropdown);
   }
 
-  dropdown.innerHTML = '';
+  currentDropdown.innerHTML = '';
   currentSelectedIndex = -1;
 
   repositionDropdown();
@@ -131,11 +170,14 @@ function showDropdown(input, suggestions) {
   const MAX_ITEMS = 100;
   const itemsToRender = suggestions.slice(0, MAX_ITEMS);
 
-  itemsToRender.forEach((value, index) => {
+  itemsToRender.forEach((suggestion, index) => {
     const item = document.createElement('div');
-    item.textContent = value;
+    item.textContent = suggestion.value;
     item.setAttribute('role', 'option');
-    item.dataset.index = index;
+    // Store the full suggestion object (value + category + counts) directly
+    // on the element, so click/keyboard selection doesn't need to re-derive
+    // it from displayed text.
+    item._fillitSuggestion = suggestion;
 
     Object.assign(item.style, {
       padding: '8px 10px',
@@ -143,16 +185,16 @@ function showDropdown(input, suggestions) {
       borderBottom: '1px solid #f0f0f0'
     });
 
+    if (suggestion.favorite) item.textContent = `★ ${suggestion.value}`;
+
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      fillField(input, value);
-      incrementUsageCount(value);
-      removeDropdown();
+      selectSuggestion(input, suggestion);
     });
 
     item.addEventListener('mouseenter', () => {
       currentSelectedIndex = index;
-      updateDropdownHighlight(dropdown);
+      updateDropdownHighlight(currentDropdown);
     });
 
     item.addEventListener('mouseleave', () => {
@@ -163,8 +205,54 @@ function showDropdown(input, suggestions) {
       }
     });
 
-    dropdown.appendChild(item);
+    currentDropdown.appendChild(item);
   });
+
+  const remaining = suggestions.length - itemsToRender.length;
+  if (remaining > 0) {
+    const hint = document.createElement('div');
+    hint.textContent = `+${remaining} resultado${remaining > 1 ? 's' : ''}. Continue digitando para refinar.`;
+    Object.assign(hint.style, {
+      padding: '6px 10px',
+      fontSize: '11px',
+      color: '#999',
+      background: '#fafafa'
+    });
+    currentDropdown.appendChild(hint);
+  }
+}
+
+// Hides the dropdown's visual element only. currentDropdownInput, the
+// keydown listener, and currentAllSuggestions stay intact, so typing can
+// keep filtering and bring the dropdown back once there's a match again.
+// This is the fix for the bug where zero filtered results permanently
+// broke further typing/filtering on the field.
+function hideDropdown() {
+  if (currentDropdown) {
+    currentDropdown.remove();
+    currentDropdown = null;
+  }
+}
+
+// Fully tears down the dropdown session: hides it AND detaches the field
+// (removes the keydown listener, clears the suggestion list). Used when
+// the user is truly done with the field — blur, Escape, or picking a value.
+function closeDropdown() {
+  hideDropdown();
+
+  if (currentDropdownInput) {
+    currentDropdownInput.removeEventListener('keydown', handleKeyboardNavigation);
+    currentDropdownInput = null;
+  }
+
+  currentAllSuggestions = [];
+  currentSelectedIndex = -1;
+}
+
+function selectSuggestion(input, suggestion) {
+  fillField(input, suggestion.value);
+  incrementUsageCount(suggestion);
+  closeDropdown();
 }
 
 function updateDropdownHighlight(dropdown) {
@@ -206,22 +294,11 @@ function handleKeyboardNavigation(e) {
   } else if (e.key === 'Enter') {
     if (currentSelectedIndex >= 0) {
       e.preventDefault();
-      const value = items[currentSelectedIndex].textContent;
-      fillField(currentDropdownInput, value);
-      incrementUsageCount(value);
-      removeDropdown();
+      const selected = items[currentSelectedIndex]._fillitSuggestion;
+      if (selected) selectSuggestion(currentDropdownInput, selected);
     }
-  } else if (e.key === 'Escape') removeDropdown();
-}
-
-function removeDropdown() {
-  if (currentDropdown) {
-    currentDropdown.remove();
-    currentDropdown = null;
-  }
-  if (currentDropdownInput) {
-    currentDropdownInput.removeEventListener('keydown', handleKeyboardNavigation);
-    currentDropdownInput = null;
+  } else if (e.key === 'Escape') {
+    closeDropdown();
   }
 }
 
@@ -231,7 +308,7 @@ function repositionDropdown() {
   const rect = currentDropdownInput.getBoundingClientRect();
 
   const isOffscreen = rect.bottom < 0 || rect.top > window.innerHeight;
-  if (isOffscreen) return removeDropdown();
+  if (isOffscreen) return hideDropdown();
 
   currentDropdown.style.minWidth = `${currentDropdownInput.offsetWidth}px`;
   currentDropdown.style.top = `${window.scrollY + rect.bottom + 4}px`;
@@ -260,16 +337,32 @@ function getDeepActiveElement(root = document) {
   return active;
 }
 
+// document.addEventListener('input', (e) => {
+//   if (!currentDropdownInput || e.target !== currentDropdownInput) return;
+
+//   const query = normalizeText(e.target.value.trim());
+//   const filtered = query
+//     ? currentAllSuggestions.filter(suggestion => normalizeText(suggestion.value).includes(query))
+//     : currentAllSuggestions;
+
+//   if (filtered.length > 0) {
+//     showDropdown(currentDropdownInput, filtered);
+//   } else {
+//     hideDropdown();
+//   }
+// });
+
 document.addEventListener('input', (e) => {
-  if (currentDropdownInput && e.target === currentDropdownInput) {
-    const query = e.target.value.toLowerCase();
+  if (!currentDropdownInput || e.target !== currentDropdownInput) return;
 
-    const filtered = currentAllSuggestions.filter(suggestion => suggestion.toLowerCase().includes(query));
+  const query = normalizeText(e.target.value.trim());
+  const filtered = query
+    ? currentAllSuggestions.filter(suggestion => normalizeText(suggestion.value).includes(query))
+    : currentAllSuggestions;
 
-    if (filtered.length > 0) {
-      showDropdown(currentDropdownInput, filtered);
-    } else removeDropdown();
-  }
+  if (filtered.length > 0) {
+    showDropdown(currentDropdownInput, filtered);
+  } else hideDropdown();
 });
 
 document.addEventListener('focusin', async (e) => {
@@ -277,6 +370,14 @@ document.addEventListener('focusin', async (e) => {
 
   if (!input || !['INPUT', 'TEXTAREA'].includes(input.tagName)) return;
   if (input.tagName === 'INPUT' && ['button', 'submit', 'checkbox', 'radio', 'file', 'hidden'].includes(input.type)) return;
+
+  // Change 1 (privacy): bail out unless this focus was caused by a recent,
+  // real user gesture. This blocks auto-focused fields (the "autofocus"
+  // HTML attribute, or a site calling .focus() on load) from ever
+  // triggering a storage read — Fillit only looks at storage once the
+  // user has actually clicked into (or tabbed into) a field themselves.
+  const isUserInitiated = (Date.now() - lastUserGestureAt) < GESTURE_WINDOW_MS;
+  if (!isUserInitiated) return;
 
   const types = identifyFieldTypes(input);
   if (!types || types.length === 0) return;
@@ -287,34 +388,46 @@ document.addEventListener('focusin', async (e) => {
   }
 
   try {
-    chrome.storage.local.get(['fillit_values', 'fillit_usage_counts'], (result) => {
+    chrome.storage.local.get(['fillit_values', 'fillit_account_connected'], (result) => {
+      // Same account gate used everywhere else in Fillit: without a Google
+      // account connected to this Chrome profile, nothing gets suggested —
+      // consistent with the popup refusing to save anything in that state.
+      if (!result.fillit_account_connected) return;
+
       const fillitValues = result.fillit_values || {};
-      const usageCounts = result.fillit_usage_counts || {};
-      let allSuggestions = [];
+      let merged = [];
 
       types.forEach(type => {
-        if (fillitValues[type] && fillitValues[type].length > 0)
-          allSuggestions = allSuggestions.concat(fillitValues[type]);
+        (fillitValues[type] || []).forEach(item => {
+          merged.push({ ...item, category: type });
+        });
       });
 
-      let uniqueSuggestions = [...new Set(allSuggestions)];
+      const seenValues = new Set();
+      const uniqueSuggestions = merged.filter(item => {
+        if (seenValues.has(item.value)) return false;
+        seenValues.add(item.value);
+        return true;
+      });
 
+      // Favorites first, then by usage count — both descending
       uniqueSuggestions.sort((a, b) => {
-        const countA = usageCounts[a] || 0;
-        const countB = usageCounts[b] || 0;
-        return countB - countA;
+        if (!!a.favorite !== !!b.favorite) return b.favorite ? 1 : -1;
+        return (b.usageCount || 0) - (a.usageCount || 0);
       });
 
       currentAllSuggestions = uniqueSuggestions;
 
-      if (currentAllSuggestions.length > 0)
+      if (currentAllSuggestions.length > 0) {
+        currentDropdownInput = input;
+        input.addEventListener('keydown', handleKeyboardNavigation);
         showDropdown(input, currentAllSuggestions);
-
+      }
     });
   } catch (error) {
     console.log('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
   }
 });
 
-document.addEventListener('focusout', () => setTimeout(removeDropdown, 150));
+document.addEventListener('focusout', () => setTimeout(closeDropdown, 50));
 document.addEventListener('scroll', repositionDropdown, true);

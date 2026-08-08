@@ -10,6 +10,7 @@ const status = document.getElementById('status');
 const profileInfo = document.getElementById('profile-info');
 
 let timeoutValue = undefined;
+let accountConnected = false;
 
 const getValues = () =>
   new Promise(resolve => {
@@ -24,6 +25,7 @@ const saveValues = values =>
   });
 
 function showStatus(text, isError = false) {
+  if (!status) return;
   status.textContent = text;
   status.style.color = isError ? 'var(--danger)' : 'var(--success)';
   
@@ -38,34 +40,82 @@ function showStatus(text, isError = false) {
 }
 
 function toggleButtonState() {
-  if (valueInput.value.trim() === '')
-    addButton.disabled = true;
-  else addButton.disabled = false;
+  if (addButton && valueInput) {
+    addButton.disabled = !accountConnected || valueInput.value.trim() === '';
+  }
 }
 
-async function renderList(animateLast = false) {
+async function renderList() {
   const category = categorySelect.value;
   const values = await getValues();
   const items = values[category] || [];
 
-  emptyMessage.style.display = items.length ? 'none' : 'block';
+  if (emptyMessage) {
+    emptyMessage.style.display = items.length ? 'none' : 'block';
+  }
   list.innerHTML = '';
 
-  items.forEach((item, index) => {
-    const li = document.createElement('li');
-    
-    if (animateLast && index === items.length - 1)
-      li.classList.add('adding');
+  const sortedItems = items.map((item, originalIndex) => ({ ...item, originalIndex }));
+  sortedItems.sort((a, b) => (b.favorite === true) - (a.favorite === true));
 
-    li.innerHTML = `<span>${item}</span><button title="Remove">✕</button>`;
-    
-    li.querySelector('button').addEventListener('click', () => removeValue(category, index, li));
-    
+  sortedItems.forEach((item) => {
+    const li = createItemElement(category, item.originalIndex, item);
     list.appendChild(li);
   });
 }
 
+function createItemElement(category, actualIndex, item) {
+  const li = document.createElement('li');
+  li.dataset.index = actualIndex;
+  updateLiContent(li, category, actualIndex, item);
+  return li;
+}
+
+function updateLiContent(li, category, actualIndex, item) {
+  const isFavClass = item.favorite ? 'fav-btn active' : 'fav-btn';
+  const favSymbol = item.favorite ? '★' : '☆';
+
+  li.innerHTML = '';
+
+  const span = document.createElement('span');
+  span.textContent = item.value;
+
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'actions';
+
+  const favBtn = document.createElement('button');
+  favBtn.className = isFavClass;
+  favBtn.title = 'Favoritar';
+  favBtn.textContent = favSymbol;
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'edit-btn';
+  editBtn.title = 'Editar';
+  editBtn.textContent = '✎';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'remove-btn';
+  removeBtn.title = 'Remover';
+  removeBtn.textContent = '✕';
+
+  actionsDiv.appendChild(favBtn);
+  actionsDiv.appendChild(editBtn);
+  actionsDiv.appendChild(removeBtn);
+
+  li.appendChild(span);
+  li.appendChild(actionsDiv);
+
+  favBtn.addEventListener('click', () => toggleFavorite(category, actualIndex));
+  editBtn.addEventListener('click', () => enterEditMode(li, category, actualIndex, item.value));
+  removeBtn.addEventListener('click', () => removeValue(category, actualIndex, li));
+}
+
 async function addValue() {
+  if (!accountConnected) {
+    showStatus('Conecte uma conta Google a este perfil do Chrome para adicionar itens.', true);
+    return;
+  }
+
   const category = categorySelect.value;
   const value = valueInput.value.trim();
   if (!value) return;
@@ -73,19 +123,26 @@ async function addValue() {
   const values = await getValues();
   if (!values[category]) values[category] = [];
 
-  if (values[category].includes(value)) {
+  const alreadyExists = values[category].some(item => item.value === value);
+  if (alreadyExists) {
     showStatus('Esse valor já está salvo.', true);
     return;
   }
 
-  values[category].push(value);
+  const newItem = { value, usageCount: 0, favorite: false };
+  values[category].unshift(newItem);
   await saveValues(values);
   
   valueInput.value = '';
   toggleButtonState(); 
-  
   showStatus('Valor adicionado');
-  renderList(true);
+  
+  await renderList();
+  
+  const firstLi = list.firstElementChild;
+  if (firstLi) {
+    firstLi.classList.add('adding');
+  }
 }
 
 async function removeValue(category, index, liElement) {
@@ -96,40 +153,147 @@ async function removeValue(category, index, liElement) {
     values[category].splice(index, 1);
     await saveValues(values);
     renderList();
-  }, 300);
+  }, 600);
 }
 
 async function showProfileInfo() {
+  if (!profileInfo) return;
   try {
     const userInfo = await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' });
-    profileInfo.textContent = userInfo.email
-      ? `Dados do perfil ${userInfo.email}`  
+    accountConnected = !!userInfo.email;
+
+    profileInfo.textContent = accountConnected
+      ? `Dados do perfil ${userInfo.email}`
       : 'Nenhum dado será salvo, pois nenhuma conta Google está conectada a este perfil do Chrome.';
   } catch (error) {
+    accountConnected = false;
     profileInfo.textContent = 'Conecte uma conta Google para salvar os dados neste perfil do Chrome.';
+  }
+
+  applyAccountGate();
+}
+
+function applyAccountGate() {
+  if (valueInput) {
+    valueInput.disabled = !accountConnected;
+    valueInput.placeholder = accountConnected
+      ? 'Adicionar item...'
+      : 'Conecte uma conta Google para adicionar';
+  }
+
+  if (profileInfo) {
+    profileInfo.style.color = accountConnected ? '' : 'var(--danger)';
+  }
+
+  toggleButtonState();
+}
+
+async function toggleFavorite(category, index) {
+  const values = await getValues();
+  if (values[category] && values[category][index]) {
+    values[category][index].favorite = !values[category][index].favorite;
+    await saveValues(values);
+    renderList();
   }
 }
 
-categorySelect.addEventListener('wheel', e => {
-  e.preventDefault();
-  const direction = e.deltaY > 0 ? 1 : -1;
-  let newIndex = categorySelect.selectedIndex + direction;
+function enterEditMode(li, category, index, currentValue) {
+  li.dataset.originalHTML = li.innerHTML;
+  li.classList.add('editing');
+  li.innerHTML = '';
 
-  if (newIndex >= categorySelect.options.length)
-    newIndex = 0;
-  else if (newIndex < 0)
-    newIndex = categorySelect.options.length - 1;
+  const editInput = document.createElement('input');
+  editInput.type = 'text';
+  editInput.className = 'edit-input';
+  editInput.value = currentValue;
+  editInput.autocomplete = 'off';
 
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'actions';
 
-  categorySelect.selectedIndex = newIndex;
-  categorySelect.dispatchEvent(new Event('change'));
-}, { passive: false });
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'save-edit-btn';
+  saveBtn.title = 'Salvar';
+  saveBtn.textContent = '✓';
 
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'cancel-edit-btn';
+  cancelBtn.title = 'Cancelar';
+  cancelBtn.textContent = '✕';
 
-addButton.addEventListener('click', addValue);
-valueInput.addEventListener('keydown', e => e.key === 'Enter' && addValue());
-valueInput.addEventListener('input', toggleButtonState);
-categorySelect.addEventListener('change', () => renderList()); 
+  actionsDiv.appendChild(saveBtn);
+  actionsDiv.appendChild(cancelBtn);
+
+  li.appendChild(editInput);
+  li.appendChild(actionsDiv);
+
+  editInput.focus();
+  editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+
+  const saveEdit = async () => {
+    const newValue = editInput.value.trim();
+    if (!newValue) return;
+
+    const values = await getValues();
+    if (values[category]) {
+      // Verifica se já existe outro item com o mesmo valor (ignorando o próprio item que está sendo editado)
+      const alreadyExists = values[category].some((item, idx) => idx !== index && item.value === newValue);
+      if (alreadyExists) {
+        showStatus('Esse valor já está salvo.', true);
+        return;
+      }
+
+      if (values[category][index]) {
+        values[category][index].value = newValue;
+        await saveValues(values);
+        
+        updateLiContent(li, category, index, values[category][index]);
+        li.classList.remove('editing');
+        showStatus('Item atualizado');
+      }
+    }
+  };
+
+  saveBtn.addEventListener('click', saveEdit);
+  editInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveEdit();
+    if (e.key === 'Escape') {
+      li.innerHTML = li.dataset.originalHTML;
+      li.classList.remove('editing');
+    }
+  });
+  cancelBtn.addEventListener('click', () => {
+    li.innerHTML = li.dataset.originalHTML;
+    li.classList.remove('editing');
+  });
+}
+
+if (categorySelect) {
+  categorySelect.addEventListener('wheel', e => {
+    e.preventDefault();
+    const direction = e.deltaY > 0 ? 1 : -1;
+    let newIndex = categorySelect.selectedIndex + direction;
+
+    if (newIndex >= categorySelect.options.length)
+      newIndex = 0;
+    else if (newIndex < 0)
+      newIndex = categorySelect.options.length - 1;
+
+    categorySelect.selectedIndex = newIndex;
+    categorySelect.dispatchEvent(new Event('change'));
+  }, { passive: false });
+
+  categorySelect.addEventListener('change', () => renderList());
+}
+
+if (addButton) {
+  addButton.addEventListener('click', addValue);
+}
+
+if (valueInput) {
+  valueInput.addEventListener('keydown', e => e.key === 'Enter' && addValue());
+  valueInput.addEventListener('input', toggleButtonState);
+}
 
 renderList();
 showProfileInfo();
