@@ -43,6 +43,24 @@ function containsKeyword(haystack, keyword) {
   return pattern.test(haystack);
 }
 
+const MASK_CHAR = '[\\d0-9#xX_]';
+const placeholderShapePatterns = {
+  zipcode: new RegExp(`^${MASK_CHAR}{5}\\s?-?\\s?${MASK_CHAR}{3}$`),
+  cpf: new RegExp(`^${MASK_CHAR}{3}\\.?${MASK_CHAR}{3}\\.?${MASK_CHAR}{3}\\s?-?\\s?${MASK_CHAR}{2}$`),
+  cnpj: new RegExp(`^${MASK_CHAR}{2}\\.?${MASK_CHAR}{3}\\.?${MASK_CHAR}{3}\\/?${MASK_CHAR}{4}\\s?-?\\s?${MASK_CHAR}{2}$`),
+  phone: new RegExp(`^\\(?${MASK_CHAR}{2}\\)?\\s?${MASK_CHAR}{4,5}\\s?-?\\s?${MASK_CHAR}{4}$`)
+};
+
+function matchPlaceholderShape(placeholder) {
+  if (!placeholder) return [];
+  const trimmed = placeholder.trim();
+  if (!trimmed) return [];
+
+  return Object.entries(placeholderShapePatterns)
+    .filter(([, pattern]) => pattern.test(trimmed))
+    .map(([type]) => type);
+}
+
 function identifyFieldTypes(input) {
   const matchedTypes = new Set();
 
@@ -65,6 +83,8 @@ function identifyFieldTypes(input) {
   for (const [fieldType, keywords] of Object.entries(typeRules))
     if (keywords.some(keyword => containsKeyword(parts, normalizeText(keyword))))
       matchedTypes.add(fieldType);
+
+  matchPlaceholderShape(input.placeholder).forEach(fieldType => matchedTypes.add(fieldType));
 
   return Array.from(matchedTypes);
 }

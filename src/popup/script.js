@@ -1,9 +1,25 @@
 const STORAGE_KEY = 'fillit_values';
+const LAST_CATEGORY_KEY = 'fillit_last_category';
 const DEFAULT_VALUES = { email: [], phone: [], name: [], cpf: [], cnpj: [], address: [], zipcode: [] };
 
 function generateId() {
   return (crypto.randomUUID) ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
+
+function saveLastCategory(category) {
+  chrome.storage.local.set({ [LAST_CATEGORY_KEY]: category });
+}
+
+const restoreLastCategory = () =>
+  new Promise(resolve => {
+    chrome.storage.local.get([LAST_CATEGORY_KEY], result => {
+      const saved = result[LAST_CATEGORY_KEY];
+      if (categorySelect && saved && [...categorySelect.options].some(opt => opt.value === saved))
+        categorySelect.value = saved;
+
+      resolve();
+    });
+  });
 
 const categorySelect = document.getElementById('category');
 const valueInput = document.getElementById('value');
@@ -287,7 +303,10 @@ if (categorySelect) {
     categorySelect.dispatchEvent(new Event('change'));
   }, { passive: false });
 
-  categorySelect.addEventListener('change', () => renderList());
+  categorySelect.addEventListener('change', () => {
+    saveLastCategory(categorySelect.value);
+    renderList();
+  });
 }
 
 if (addButton)
@@ -299,6 +318,11 @@ if (valueInput) {
   valueInput.addEventListener('input', toggleButtonState);
 }
 
-renderList();
-showProfileInfo();
-toggleButtonState();
+async function init() {
+  await restoreLastCategory();
+  renderList();
+  showProfileInfo();
+  toggleButtonState();
+}
+
+init();

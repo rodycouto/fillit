@@ -271,3 +271,11 @@ input {
 #profile-info {
   text-align: center;
 }
+
+#status {
+  text-align: center;
+}
+
+#empty-message {
+  text-align: center;
+}
