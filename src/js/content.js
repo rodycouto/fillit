@@ -426,4 +426,5 @@ document.addEventListener('focusout', () => {
     if (dropdownSessionId === sessionAtBlur) closeDropdown();
   }, 50);
 });
+
 document.addEventListener('scroll', repositionDropdown, true);
