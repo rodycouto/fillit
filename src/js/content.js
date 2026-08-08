@@ -1,5 +1,7 @@
 let currentDropdown = null;
 let currentDropdownInput = null;
+let currentSelectedIndex = -1;
+let currentAllSuggestions = [];
 
 const typeRules = {
   email: ['email', 'e-mail', 'correio'],
@@ -11,9 +13,10 @@ const typeRules = {
   zipcode: ['cep', 'zipcode', 'zip']
 };
 
-function identifyFieldType(input) {
+function identifyFieldTypes(input) {
+  const matchedTypes = new Set();
 
-  if (input.type === 'email') return 'email';
+  if (input.type === 'email') matchedTypes.add('email');
 
   const autocomplete = (input.autocomplete || '').toLowerCase();
   const parts = [
@@ -27,11 +30,13 @@ function identifyFieldType(input) {
     .join(' ')
     .toLowerCase();
 
-  for (const [fieldType, keywords] of Object.entries(typeRules))
-    if (keywords.some(keyword => parts.includes(keyword)))
-      return fieldType;
+  for (const [fieldType, keywords] of Object.entries(typeRules)) {
+    if (keywords.some(keyword => parts.includes(keyword))) {
+      matchedTypes.add(fieldType);
+    }
+  }
 
-  return null;
+  return Array.from(matchedTypes);
 }
 
 function findLabelAssociated(input) {
@@ -78,55 +83,144 @@ function findContextualText(input) {
   return text.filter(Boolean).join(' ');
 }
 
-function showDropdown(input, suggestions) {
-  removeDropdown();
+function incrementUsageCount(value) {
+  if (!chrome.runtime?.id) return;
 
-  const dropdown = document.createElement('div');
-  dropdown.id = 'fillit-dropdown';
-  Object.assign(dropdown.style, {
-    position: 'absolute',
-    zIndex: '999999',
-    background: '#fff',
-    border: '1px solid #ccc',
-    borderRadius: '6px',
-    boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
-    fontFamily: 'system-ui, sans-serif',
-    fontSize: '13px',
-    overflow: 'hidden',
-    minWidth: `${input.offsetWidth}px`
+  chrome.storage.local.get(['fillit_usage_counts'], (result) => {
+    const counts = result.fillit_usage_counts || {};
+    counts[value] = (counts[value] || 0) + 1;
+    chrome.storage.local.set({ fillit_usage_counts: counts });
   });
+}
 
-  const rect = input.getBoundingClientRect();
-  dropdown.style.top = `${window.scrollY + rect.bottom + 4}px`;
-  dropdown.style.left = `${window.scrollX + rect.left}px`;
+function showDropdown(input, suggestions) {
+  let dropdown = currentDropdown;
 
-  suggestions.forEach(value => {
+  if (!dropdown) {
+    dropdown = document.createElement('div');
+    dropdown.id = 'fillit-dropdown';
+    dropdown.setAttribute('role', 'listbox');
+
+    Object.assign(dropdown.style, {
+      position: 'absolute',
+      zIndex: '999999',
+      background: '#fff',
+      border: '1px solid #ccc',
+      borderRadius: '6px',
+      boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '13px',
+      overflowX: 'hidden',
+      overflowY: 'auto',
+      maxHeight: '250px',
+      minWidth: `${input.offsetWidth}px`
+    });
+
+    document.body.appendChild(dropdown);
+    currentDropdown = dropdown;
+    currentDropdownInput = input;
+
+    input.addEventListener('keydown', handleKeyboardNavigation);
+  }
+
+  dropdown.innerHTML = '';
+  currentSelectedIndex = -1;
+
+  repositionDropdown();
+
+  const MAX_ITEMS = 100;
+  const itemsToRender = suggestions.slice(0, MAX_ITEMS);
+
+  itemsToRender.forEach((value, index) => {
     const item = document.createElement('div');
     item.textContent = value;
+    item.setAttribute('role', 'option');
+    item.dataset.index = index;
+
     Object.assign(item.style, {
       padding: '8px 10px',
       cursor: 'pointer',
       borderBottom: '1px solid #f0f0f0'
     });
+
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
       fillField(input, value);
+      incrementUsageCount(value);
       removeDropdown();
     });
-    item.addEventListener('mouseenter', () => item.style.background = '#f5f5f5');
-    item.addEventListener('mouseleave', () => item.style.background = '#fff');
+
+    item.addEventListener('mouseenter', () => {
+      currentSelectedIndex = index;
+      updateDropdownHighlight(dropdown);
+    });
+
+    item.addEventListener('mouseleave', () => {
+      if (currentSelectedIndex === index) {
+        item.style.background = '#fff';
+        item.setAttribute('aria-selected', 'false');
+        currentSelectedIndex = -1;
+      }
+    });
+
     dropdown.appendChild(item);
   });
+}
 
-  document.body.appendChild(dropdown);
-  currentDropdown = dropdown;
-  currentDropdownInput = input;
+function updateDropdownHighlight(dropdown) {
+  const items = dropdown.children;
+  for (let i = 0; i < items.length; i++) {
+    if (i === currentSelectedIndex) {
+      items[i].style.background = '#e6f7ff';
+      items[i].setAttribute('aria-selected', 'true');
+
+      const itemTop = items[i].offsetTop;
+      const itemBottom = itemTop + items[i].offsetHeight;
+
+      if (itemTop < dropdown.scrollTop)
+        dropdown.scrollTop = itemTop;
+      else if (itemBottom > dropdown.scrollTop + dropdown.offsetHeight)
+        dropdown.scrollTop = itemBottom - dropdown.offsetHeight;
+
+    } else {
+      items[i].style.background = '#fff';
+      items[i].setAttribute('aria-selected', 'false');
+    }
+  }
+}
+
+function handleKeyboardNavigation(e) {
+  if (!currentDropdown) return;
+
+  const items = currentDropdown.children;
+  if (items.length === 0) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    currentSelectedIndex = (currentSelectedIndex + 1) % items.length;
+    updateDropdownHighlight(currentDropdown);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    currentSelectedIndex = (currentSelectedIndex - 1 + items.length) % items.length;
+    updateDropdownHighlight(currentDropdown);
+  } else if (e.key === 'Enter') {
+    if (currentSelectedIndex >= 0) {
+      e.preventDefault();
+      const value = items[currentSelectedIndex].textContent;
+      fillField(currentDropdownInput, value);
+      incrementUsageCount(value);
+      removeDropdown();
+    }
+  } else if (e.key === 'Escape') removeDropdown();
 }
 
 function removeDropdown() {
   if (currentDropdown) {
     currentDropdown.remove();
     currentDropdown = null;
+  }
+  if (currentDropdownInput) {
+    currentDropdownInput.removeEventListener('keydown', handleKeyboardNavigation);
     currentDropdownInput = null;
   }
 }
@@ -137,11 +231,9 @@ function repositionDropdown() {
   const rect = currentDropdownInput.getBoundingClientRect();
 
   const isOffscreen = rect.bottom < 0 || rect.top > window.innerHeight;
-  if (isOffscreen) {
-    removeDropdown();
-    return;
-  }
+  if (isOffscreen) return removeDropdown();
 
+  currentDropdown.style.minWidth = `${currentDropdownInput.offsetWidth}px`;
   currentDropdown.style.top = `${window.scrollY + rect.bottom + 4}px`;
   currentDropdown.style.left = `${window.scrollX + rect.left}px`;
 }
@@ -160,13 +252,34 @@ function fillField(input, value) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+function getDeepActiveElement(root = document) {
+  const active = root.activeElement;
+  if (active && active.shadowRoot)
+    return getDeepActiveElement(active.shadowRoot);
+
+  return active;
+}
+
+document.addEventListener('input', (e) => {
+  if (currentDropdownInput && e.target === currentDropdownInput) {
+    const query = e.target.value.toLowerCase();
+
+    const filtered = currentAllSuggestions.filter(suggestion => suggestion.toLowerCase().includes(query));
+
+    if (filtered.length > 0) {
+      showDropdown(currentDropdownInput, filtered);
+    } else removeDropdown();
+  }
+});
+
 document.addEventListener('focusin', async (e) => {
-  const input = e.target;
-  if (!['INPUT', 'TEXTAREA'].includes(input.tagName)) return;
+  const input = getDeepActiveElement() || e.target;
+
+  if (!input || !['INPUT', 'TEXTAREA'].includes(input.tagName)) return;
   if (input.tagName === 'INPUT' && ['button', 'submit', 'checkbox', 'radio', 'file', 'hidden'].includes(input.type)) return;
 
-  const type = identifyFieldType(input);
-  if (!type) return;
+  const types = identifyFieldTypes(input);
+  if (!types || types.length === 0) return;
 
   if (!chrome.runtime?.id) {
     console.log('Fillit: extension context invalidated. Refresh the page (F5) to reconnect.');
@@ -174,11 +287,29 @@ document.addEventListener('focusin', async (e) => {
   }
 
   try {
-    chrome.storage.local.get(['fillit_values'], (result) => {
+    chrome.storage.local.get(['fillit_values', 'fillit_usage_counts'], (result) => {
       const fillitValues = result.fillit_values || {};
-      const suggestions = fillitValues[type];
-      if (suggestions && suggestions.length > 0)
-        showDropdown(input, suggestions);
+      const usageCounts = result.fillit_usage_counts || {};
+      let allSuggestions = [];
+
+      types.forEach(type => {
+        if (fillitValues[type] && fillitValues[type].length > 0)
+          allSuggestions = allSuggestions.concat(fillitValues[type]);
+      });
+
+      let uniqueSuggestions = [...new Set(allSuggestions)];
+
+      uniqueSuggestions.sort((a, b) => {
+        const countA = usageCounts[a] || 0;
+        const countB = usageCounts[b] || 0;
+        return countB - countA;
+      });
+
+      currentAllSuggestions = uniqueSuggestions;
+
+      if (currentAllSuggestions.length > 0)
+        showDropdown(input, currentAllSuggestions);
+
     });
   } catch (error) {
     console.log('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
