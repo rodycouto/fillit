@@ -12,10 +12,6 @@ const CATEGORIES = {
   zipcode: 'CEP'
 };
 
-// chrome.identity is only available in extension contexts (background,
-// popup) — content.js can't call it directly. So we resolve it here and
-// mirror the result into storage as a plain boolean, which content.js and
-// the popup can both read the same way they already read fillit_values.
 async function updateAccountStatus() {
     try {
         const userInfo = await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' });
@@ -25,8 +21,6 @@ async function updateAccountStatus() {
     }
 }
 
-// Keep the flag fresh: on every service worker wake-up, on browser start,
-// and immediately whenever the person signs in/out of their Chrome profile.
 updateAccountStatus();
 chrome.runtime.onStartup.addListener(updateAccountStatus);
 if (chrome.identity.onSignInChanged) {
@@ -72,11 +66,6 @@ function initStorage() {
     });
 }
 
-// Upgrades items stored as plain strings (older versions of Fillit) into
-// the current object shape { value, usageCount, favorite }. Also folds in
-// any usage counts left over from the old separate "fillit_usage_counts"
-// store, then deletes that store — usage counts now live on the item
-// itself, so deleting an item also deletes its count. No orphaned data.
 async function migrateStorage() {
     const result = await chrome.storage.local.get([STORAGE_KEY, LEGACY_USAGE_COUNTS_KEY]);
     const values = result[STORAGE_KEY];
@@ -134,8 +123,6 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
     const value = info.selectionText?.trim();
     if (!value) return;
 
-    // Same account gate as the popup: no Google account connected to this
-    // Chrome profile means Fillit doesn't store anything new, period.
     const userInfo = await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }).catch(() => ({}));
     if (!userInfo.email) return;
 

@@ -28,15 +28,15 @@ function showStatus(text, isError = false) {
   if (!status) return;
   status.textContent = text;
   status.style.color = isError ? 'var(--danger)' : 'var(--success)';
-  
+
   status.classList.add('show');
-  
+
   if (setTimeout) clearTimeout(timeoutValue);
   timeoutValue = setTimeout(() => {
     status.classList.remove('show');
     timeoutValue = undefined;
     setTimeout(() => status.textContent = '', 300);
-  }, 4000); 
+  }, 4000);
 }
 
 function toggleButtonState() {
@@ -132,13 +132,13 @@ async function addValue() {
   const newItem = { value, usageCount: 0, favorite: false };
   values[category].unshift(newItem);
   await saveValues(values);
-  
+
   valueInput.value = '';
-  toggleButtonState(); 
+  toggleButtonState();
   showStatus('Valor adicionado');
-  
+
   await renderList();
-  
+
   const firstLi = list.firstElementChild;
   if (firstLi) {
     firstLi.classList.add('adding');
@@ -236,17 +236,14 @@ function enterEditMode(li, category, index, currentValue) {
 
     const values = await getValues();
     if (values[category]) {
-      // Verifica se já existe outro item com o mesmo valor (ignorando o próprio item que está sendo editado)
       const alreadyExists = values[category].some((item, idx) => idx !== index && item.value === newValue);
-      if (alreadyExists) {
-        showStatus('Esse valor já está salvo.', true);
-        return;
-      }
+      if (alreadyExists)
+        return showStatus('Esse valor já está salvo.', true);
 
       if (values[category][index]) {
         values[category][index].value = newValue;
         await saveValues(values);
-        
+
         updateLiContent(li, category, index, values[category][index]);
         li.classList.remove('editing');
         showStatus('Item atualizado');
@@ -286,9 +283,9 @@ if (categorySelect) {
   categorySelect.addEventListener('change', () => renderList());
 }
 
-if (addButton) {
+if (addButton)
   addButton.addEventListener('click', addValue);
-}
+
 
 if (valueInput) {
   valueInput.addEventListener('keydown', e => e.key === 'Enter' && addValue());

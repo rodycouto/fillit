@@ -3,12 +3,6 @@ let currentDropdownInput = null;
 let currentSelectedIndex = -1;
 let currentAllSuggestions = [];
 
-// Change 1 (privacy): the dropdown must only ever open in response to a
-// real user gesture (a click, or Tab-key navigation) on the field — never
-// on page load, never from a site auto-focusing a field via the
-// "autofocus" attribute or a script calling .focus() programmatically.
-// We track the timestamp of the last real gesture and require a recent
-// one before treating a "focusin" event as legitimate.
 let lastUserGestureAt = 0;
 const GESTURE_WINDOW_MS = 400;
 
@@ -23,10 +17,6 @@ document.addEventListener('keydown', (e) => {
 
 const typeRules = {
   email: ['email', 'e-mail', 'correio'],
-  // 'tel' was removed on purpose: as a 3-letter fragment it matched
-  // unrelated words like "hotel", "detail", "intel", producing false
-  // positives. 'telefone', 'phone', 'celular', 'whatsapp' already cover
-  // real phone fields, and input.type === 'tel' is handled separately.
   phone: ['telefone', 'phone', 'celular', 'whatsapp'],
   cpf: ['cpf'],
   cnpj: ['cnpj'],
@@ -39,7 +29,7 @@ function normalizeText(text) {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, ''); // strip accents, so "sao" matches "São"
+    .replace(/[\u0300-\u036f]/g, ''); 
 }
 
 function identifyFieldTypes(input) {
@@ -114,10 +104,6 @@ function findContextualText(input) {
   return text.filter(Boolean).join(' ');
 }
 
-// Change 3: usage count now lives inside the item itself (fillit_values),
-// not in a separate store. We know which category the item belongs to
-// because each suggestion object carries its own `category`, attached
-// when the suggestions were merged in the focusin handler.
 function incrementUsageCount(suggestion) {
   if (!chrome.runtime?.id || !suggestion?.category) return;
 
@@ -134,10 +120,6 @@ function incrementUsageCount(suggestion) {
   });
 }
 
-// Creates (or reuses) the dropdown's DOM element and positions it next to
-// the field. Does NOT touch currentDropdownInput or the keydown listener
-// lifecycle — those are managed separately so a temporary empty-results
-// state doesn't tear down the ability to keep typing and filtering.
 function showDropdown(input, suggestions) {
   if (!currentDropdown) {
     currentDropdown = document.createElement('div');
@@ -174,9 +156,6 @@ function showDropdown(input, suggestions) {
     const item = document.createElement('div');
     item.textContent = suggestion.value;
     item.setAttribute('role', 'option');
-    // Store the full suggestion object (value + category + counts) directly
-    // on the element, so click/keyboard selection doesn't need to re-derive
-    // it from displayed text.
     item._fillitSuggestion = suggestion;
 
     Object.assign(item.style, {
@@ -222,11 +201,6 @@ function showDropdown(input, suggestions) {
   }
 }
 
-// Hides the dropdown's visual element only. currentDropdownInput, the
-// keydown listener, and currentAllSuggestions stay intact, so typing can
-// keep filtering and bring the dropdown back once there's a match again.
-// This is the fix for the bug where zero filtered results permanently
-// broke further typing/filtering on the field.
 function hideDropdown() {
   if (currentDropdown) {
     currentDropdown.remove();
@@ -234,9 +208,6 @@ function hideDropdown() {
   }
 }
 
-// Fully tears down the dropdown session: hides it AND detaches the field
-// (removes the keydown listener, clears the suggestion list). Used when
-// the user is truly done with the field — blur, Escape, or picking a value.
 function closeDropdown() {
   hideDropdown();
 
@@ -337,21 +308,6 @@ function getDeepActiveElement(root = document) {
   return active;
 }
 
-// document.addEventListener('input', (e) => {
-//   if (!currentDropdownInput || e.target !== currentDropdownInput) return;
-
-//   const query = normalizeText(e.target.value.trim());
-//   const filtered = query
-//     ? currentAllSuggestions.filter(suggestion => normalizeText(suggestion.value).includes(query))
-//     : currentAllSuggestions;
-
-//   if (filtered.length > 0) {
-//     showDropdown(currentDropdownInput, filtered);
-//   } else {
-//     hideDropdown();
-//   }
-// });
-
 document.addEventListener('input', (e) => {
   if (!currentDropdownInput || e.target !== currentDropdownInput) return;
 
@@ -371,11 +327,6 @@ document.addEventListener('focusin', async (e) => {
   if (!input || !['INPUT', 'TEXTAREA'].includes(input.tagName)) return;
   if (input.tagName === 'INPUT' && ['button', 'submit', 'checkbox', 'radio', 'file', 'hidden'].includes(input.type)) return;
 
-  // Change 1 (privacy): bail out unless this focus was caused by a recent,
-  // real user gesture. This blocks auto-focused fields (the "autofocus"
-  // HTML attribute, or a site calling .focus() on load) from ever
-  // triggering a storage read — Fillit only looks at storage once the
-  // user has actually clicked into (or tabbed into) a field themselves.
   const isUserInitiated = (Date.now() - lastUserGestureAt) < GESTURE_WINDOW_MS;
   if (!isUserInitiated) return;
 
@@ -389,9 +340,6 @@ document.addEventListener('focusin', async (e) => {
 
   try {
     chrome.storage.local.get(['fillit_values', 'fillit_account_connected'], (result) => {
-      // Same account gate used everywhere else in Fillit: without a Google
-      // account connected to this Chrome profile, nothing gets suggested —
-      // consistent with the popup refusing to save anything in that state.
       if (!result.fillit_account_connected) return;
 
       const fillitValues = result.fillit_values || {};
@@ -410,7 +358,6 @@ document.addEventListener('focusin', async (e) => {
         return true;
       });
 
-      // Favorites first, then by usage count — both descending
       uniqueSuggestions.sort((a, b) => {
         if (!!a.favorite !== !!b.favorite) return b.favorite ? 1 : -1;
         return (b.usageCount || 0) - (a.usageCount || 0);
