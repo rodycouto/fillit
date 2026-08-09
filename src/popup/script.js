@@ -13,9 +13,11 @@ function saveLastCategory(category) {
 const restoreLastCategory = () =>
   new Promise(resolve => {
     chrome.storage.local.get([LAST_CATEGORY_KEY], result => {
-      const saved = result[LAST_CATEGORY_KEY];
-      if (categorySelect && saved && [...categorySelect.options].some(opt => opt.value === saved))
-        categorySelect.value = saved;
+      if (!chrome.runtime.lastError) {
+        const saved = result[LAST_CATEGORY_KEY];
+        if (categorySelect && saved && [...categorySelect.options].some(opt => opt.value === saved))
+          categorySelect.value = saved;
+      }
 
       resolve();
     });
@@ -47,6 +49,31 @@ const saveValues = values =>
       resolve();
     });
   });
+
+let storageQueue = Promise.resolve();
+function runExclusive(fn) {
+  const run = storageQueue.then(fn, fn);
+  storageQueue = run.catch(() => { });
+  return run;
+}
+
+function sortedIds(items) {
+  return [...items]
+    .sort((a, b) => (b.favorite === true) - (a.favorite === true))
+    .map(item => item.id);
+}
+
+function reorderListDom(idsInOrder) {
+  let referenceEl = null;
+  for (let i = idsInOrder.length - 1; i >= 0; i--) {
+    const el = list.querySelector(`li[data-id="${CSS.escape(idsInOrder[i])}"]`);
+    if (!el) continue;
+    if (el.nextSibling !== referenceEl)
+      list.insertBefore(el, referenceEl);
+
+    referenceEl = el;
+  }
+}
 
 function showStatus(text, isError = false) {
   if (!status) return;
@@ -107,6 +134,8 @@ function updateLiContent(li, category, item) {
   const span = document.createElement('span');
   span.textContent = item.value;
 
+  span.addEventListener('dblclick', () => enterEditMode(li, category, item));
+
   const actionsDiv = document.createElement('div');
   actionsDiv.className = 'actions';
 
@@ -146,36 +175,30 @@ async function addValue() {
   if (!value) return;
 
   try {
-    const values = await getValues();
-    if (!values[category]) values[category] = [];
+    await runExclusive(async () => {
+      const values = await getValues();
+      if (!values[category]) values[category] = [];
 
-    const alreadyExists = values[category].some(item => item.value === value);
-    if (alreadyExists)
-      return showStatus('Esse valor já está salvo.', true);
+      const alreadyExists = values[category].some(item => item.value === value);
+      if (alreadyExists)
+        return showStatus('Esse valor já está salvo.', true);
 
-    const newItem = { id: generateId(), value, usageCount: 0, favorite: false };
-    values[category].unshift(newItem);
-    await saveValues(values);
+      const newItem = { id: generateId(), value, usageCount: 0, favorite: false };
+      values[category].unshift(newItem);
+      await saveValues(values);
 
-    valueInput.value = '';
-    toggleButtonState();
-    showStatus('Valor adicionado');
+      valueInput.value = '';
+      toggleButtonState();
+      showStatus('Valor adicionado');
 
-    if (emptyMessage) emptyMessage.style.display = 'none';
+      if (categorySelect.value !== category) return;
+      if (emptyMessage) emptyMessage.style.display = 'none';
 
-    const li = createItemElement(category, newItem);
-    li.classList.add('adding');
-
-    let inserted = false;
-    for (const child of list.children) {
-      if (!child.querySelector('.fav-btn.active')) {
-        list.insertBefore(li, child);
-        inserted = true;
-        break;
-      }
-    }
-
-    if (!inserted) list.appendChild(li);
+      const li = createItemElement(category, newItem);
+      li.classList.add('adding');
+      list.appendChild(li);
+      reorderListDom(sortedIds(values[category]));
+    });
   } catch (error) {
     showStatus('Erro ao salvar valor.', true);
   }
@@ -183,16 +206,18 @@ async function addValue() {
 
 async function removeValue(category, id, liElement) {
   if (liElement.classList.contains('removing')) return;
-  
+
   liElement.classList.add('removing');
 
   setTimeout(async () => {
     try {
-      const values = await getValues();
-      if (values[category]) {
-        values[category] = values[category].filter(item => item.id !== id);
-        await saveValues(values);
-      }
+      await runExclusive(async () => {
+        const values = await getValues();
+        if (values[category]) {
+          values[category] = values[category].filter(item => item.id !== id);
+          await saveValues(values);
+        }
+      });
 
       liElement.remove();
 
@@ -201,7 +226,7 @@ async function removeValue(category, id, liElement) {
       }
     } catch (error) {
       showStatus('Erro ao remover item.', true);
-      liElement.classList.remove('removing'); 
+      liElement.classList.remove('removing');
     }
   }, 600);
 }
@@ -240,21 +265,22 @@ function applyAccountGate() {
 
 async function toggleFavorite(category, id) {
   try {
-    const values = await getValues();
-    const item = values[category]?.find(i => i.id === id);
-    if (item) {
+    await runExclusive(async () => {
+      const values = await getValues();
+      const item = values[category]?.find(i => i.id === id);
+      if (!item) return;
+
       item.favorite = !item.favorite;
       await saveValues(values);
 
-      const li = document.querySelector(`li[data-id="${id}"]`);
+      const li = list.querySelector(`li[data-id="${CSS.escape(id)}"]`);
       if (li && !li.classList.contains('editing')) {
         updateLiContent(li, category, item);
-
-        if (item.favorite)
-          list.insertBefore(li, list.firstChild);
-        else list.appendChild(li);
       }
-    }
+
+      if (categorySelect.value === category)
+        reorderListDom(sortedIds(values[category]));
+    });
   } catch (error) {
     showStatus('Erro ao atualizar favorito.', true);
   }
@@ -293,53 +319,62 @@ function enterEditMode(li, category, item) {
   editInput.setSelectionRange(editInput.value.length, editInput.value.length);
 
   let isSaving = false;
+  let cancelled = false;
 
   const saveEdit = async () => {
-    if (isSaving) return;
-    
+    if (isSaving || cancelled) return;
+
     const newValue = editInput.value.trim();
     if (!newValue) return;
 
     isSaving = true;
     editInput.disabled = true;
+    saveBtn.disabled = true;
 
     try {
-      const values = await getValues();
-      if (values[category]) {
+      await runExclusive(async () => {
+        if (cancelled) return;
+
+        const values = await getValues();
+        if (cancelled || !values[category]) return;
+
         const alreadyExists = values[category].some(i => i.id !== item.id && i.value === newValue);
-        if (alreadyExists) {
-          isSaving = false;
-          editInput.disabled = false;
-          editInput.focus();
+        if (alreadyExists)
           return showStatus('Esse valor já está salvo.', true);
-        }
 
         const storedItem = values[category].find(i => i.id === item.id);
-        if (storedItem) {
-          storedItem.value = newValue;
-          await saveValues(values);
+        if (!storedItem) return;
 
-          item.value = newValue;
-          updateLiContent(li, category, storedItem);
-          li.classList.remove('editing');
-          showStatus('Item atualizado');
-        }
-      }
+        storedItem.value = newValue;
+        await saveValues(values);
+        item.value = newValue;
+        if (cancelled) return;
+
+        updateLiContent(li, category, storedItem);
+        li.classList.remove('editing');
+        showStatus('Item atualizado');
+      });
     } catch (error) {
+      if (!cancelled) showStatus('Erro ao salvar item.', true);
+    } finally {
       isSaving = false;
-      editInput.disabled = false;
-      showStatus('Erro ao salvar item.', true);
+      if (!cancelled) {
+        editInput.disabled = false;
+        saveBtn.disabled = false;
+        if (li.classList.contains('editing')) editInput.focus();
+      }
     }
   };
 
   const cancelEdit = () => {
+    cancelled = true;
     updateLiContent(li, category, item);
     li.classList.remove('editing');
   };
 
   saveBtn.addEventListener('click', saveEdit);
   cancelBtn.addEventListener('click', cancelEdit);
-  
+
   editInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') saveEdit();
     if (e.key === 'Escape') cancelEdit();
