@@ -23,7 +23,7 @@ document.addEventListener('keydown', (e) => {
 
 const typeRules = {
   email: ['email', 'e-mail', 'correio'],
-  phone: ['telefone', 'phone', 'celular', 'whatsapp'],
+  phone: ['telefone', 'phone', 'celular', 'whatsapp', 'telefones'],
   cpf: ['cpf'],
   cnpj: ['cnpj'],
   name: ['nome', 'name', 'fullname', 'nome-completo', 'username', 'apelido', 'sobrenome', 'first-name', 'last-name'],
