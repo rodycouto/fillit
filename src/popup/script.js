@@ -91,9 +91,9 @@ function showStatus(text, isError = false) {
 }
 
 function toggleButtonState() {
-  if (addButton && valueInput) {
-    addButton.disabled = !accountConnected || valueInput.value.trim() === '';
-  }
+  if (addButton && valueInput)
+    addButton.disabled = valueInput.value.trim() === '';
+    // addButton.disabled = !accountConnected || valueInput.value.trim() === '';
 }
 
 async function renderList() {
@@ -167,8 +167,8 @@ function updateLiContent(li, category, item) {
 }
 
 async function addValue() {
-  if (!accountConnected)
-    return showStatus('Conecte uma conta Google a este perfil do Chrome para adicionar itens.', true);
+  // if (!accountConnected)
+  //   return showStatus('Conecte uma conta Google a este perfil do Chrome para adicionar itens.', true);
 
   const category = categorySelect.value;
   const value = valueInput.value.trim();
