@@ -1,14 +1,56 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 :root {
+  color-scheme: light dark;
   --bg-color: #ffffff;
-  --bg-secondary: #f2f2f7; 
+  --bg-secondary: #f2f2f7;
+  --bg-hover: #f2f2f7;
   --text-primary: #1d1d1f;
-  --text-secondary: #86868b;
+  --text-secondary: #6e6e73;
   --border-color: #e5e5ea;
-  --apple-blue: #007aff;
-  --apple-blue-hover: #0066cc;
+  --border-strong: #949499;
+  --apple-blue: #0062cc;
+  --apple-blue-hover: #0052ad;
+  --apple-blue-accent: #007aff;
+  --apple-blue-text: #0062cc;
   --danger: #ff3b30;
+  --danger-text: #d70015;
   --success: #34c759;
-  --star-gold: #ffcc00;
+  --success-text: #248a3d;
+  --star-empty: #8e8e93;
+  --star-gold: #b8860b;
+  --focus-ring: #0a84ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-color: #1c1c1e;
+    --bg-secondary: #2c2c2e;
+    --bg-hover: #3a3a3c;
+    --text-primary: #f5f5f7;
+    --text-secondary: #98989d;
+    --border-color: #3a3a3c;
+    --border-strong: #6c6c70;
+    --apple-blue: #0d6fd1;
+    --apple-blue-hover: #1a7fe0;
+    --apple-blue-text: #4da3ff;
+    --apple-blue-accent: #0a84ff;
+
+    --danger: #ff453a;
+    --danger-text: #ff6961;
+
+    --success: #30d158;
+    --success-text: #30d158;
+
+    --star-empty: #8e8e93;
+    --star-gold: #ffd60a;
+
+    --focus-ring: #64a9ff;
+  }
 }
 
 body {
@@ -44,7 +86,7 @@ header h1 {
 
 .input-card {
   background: var(--bg-secondary);
-  border-radius: 28px; 
+  border-radius: 28px;
   padding: 10px;
   margin-bottom: 16px;
 }
@@ -55,7 +97,6 @@ header h1 {
   align-items: center;
 }
 
-/* Custom Dropdown de Categorias */
 .category-select-container {
   position: relative;
   flex: 0 0 105px;
@@ -66,18 +107,31 @@ header h1 {
   padding: 9px 10px;
   background-color: var(--bg-color);
   border: 1px solid var(--bg-color);
-  border-radius: 50px; 
+  border-radius: 50px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-primary);
   cursor: pointer;
-  outline: none;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
-  transition: all 0.2s;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+button:focus-visible,
+input:focus-visible,
+li:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 50px;
+}
+
+.category-menu-list li:focus-visible,
+#list li:focus-visible {
+  outline-offset: -2px;
 }
 
 .category-toggle-btn #category-selected-label {
@@ -89,6 +143,11 @@ header h1 {
 .chevron {
   color: var(--text-secondary);
   font-size: 10px;
+  transition: transform 0.2s;
+}
+
+.category-toggle-btn[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
 }
 
 .category-dropdown {
@@ -105,10 +164,9 @@ header h1 {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.category-dropdown.hidden {
-  display: none;
+  max-height: 320px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
 }
 
 .add-category-box {
@@ -119,11 +177,13 @@ header h1 {
 
 .add-category-box input {
   flex: 1;
+  min-width: 0;
   padding: 6px 10px;
   font-size: 11px;
   border: 1px solid var(--border-color);
   border-radius: 20px;
   background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .add-category-box button {
@@ -132,7 +192,7 @@ header h1 {
   min-width: 26px;
   border-radius: 50%;
   background: var(--apple-blue);
-  color: white;
+  color: #ffffff;
   border: none;
   cursor: pointer;
   font-size: 14px;
@@ -141,9 +201,8 @@ header h1 {
   justify-content: center;
 }
 
-/* Estilização da mensagem de erro restrita ao menu de categorias */
 #category-error-message {
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: 11px;
   padding: 0 4px;
   margin-top: 2px;
@@ -162,8 +221,9 @@ header h1 {
   list-style: none;
   padding: 0;
   margin: 0;
-  max-height: 150px;
+  max-height: 180px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -179,16 +239,15 @@ header h1 {
 }
 
 .category-item:hover {
-  background: var(--bg-secondary);
+  background: var(--bg-hover);
 }
 
 .category-item.selected {
   background: rgba(0, 122, 255, 0.08);
   font-weight: 600;
-  color: var(--apple-blue);
+  color: var(--apple-blue-text); /* [C3] */
 }
 
-/* Botão X de exclusão no lado ESQUERDO */
 .cat-remove-btn {
   background: transparent;
   border: none;
@@ -196,6 +255,7 @@ header h1 {
   cursor: pointer;
   width: 20px;
   height: 20px;
+  min-width: 20px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -206,19 +266,19 @@ header h1 {
 }
 
 .cat-remove-btn:hover {
-  color: var(--danger);
+  color: var(--danger-text);
   background: rgba(255, 59, 48, 0.12);
 }
 
 .cat-label {
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
 }
 
-/* Botão de edição no lado DIREITO */
 .cat-edit-btn {
   background: transparent;
   border: none;
@@ -226,6 +286,7 @@ header h1 {
   cursor: pointer;
   width: 20px;
   height: 20px;
+  min-width: 20px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -236,7 +297,7 @@ header h1 {
 }
 
 .cat-edit-btn:hover {
-  color: var(--apple-blue);
+  color: var(--apple-blue-text);
   background: rgba(0, 122, 255, 0.12);
 }
 
@@ -246,12 +307,13 @@ header h1 {
 
 .cat-edit-input {
   flex: 1;
+  min-width: 0;
   font-size: 11px;
   padding: 4px 6px;
   border: 1px solid var(--apple-blue);
   border-radius: 6px;
-  outline: none;
   background: var(--bg-color);
+  color: var(--text-primary);
 }
 
 .cat-edit-actions {
@@ -259,12 +321,14 @@ header h1 {
   gap: 2px;
 }
 
-.cat-save-btn, .cat-cancel-btn {
+.cat-save-btn,
+.cat-cancel-btn {
   background: transparent;
   border: none;
   cursor: pointer;
   width: 20px;
   height: 20px;
+  min-width: 20px;
   border-radius: 50%;
   font-size: 11px;
   display: flex;
@@ -272,8 +336,8 @@ header h1 {
   justify-content: center;
 }
 
-.cat-save-btn { color: var(--success); }
-.cat-cancel-btn { color: var(--danger); }
+.cat-save-btn { color: var(--success-text); }   /* [C3] */
+.cat-cancel-btn { color: var(--danger-text); }  /* [C3] */
 
 .no-categories-msg {
   font-size: 11px;
@@ -282,8 +346,7 @@ header h1 {
   padding: 6px 0;
 }
 
-/* Demais estilos de input e listas */
-input {
+input:where([type="text"], [type="search"], :not([type])) {
   flex: 1;
   min-width: 0;
   padding: 9px 12px;
@@ -291,14 +354,18 @@ input {
   border-radius: 50px;
   font-size: 12px;
   background-color: var(--bg-color);
-  outline: none;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-  transition: all 0.2s;
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+input::placeholder {
+  color: var(--text-secondary);
 }
 
 #add-button {
   background: var(--apple-blue);
-  color: white;
+  color: #ffffff;
   border: none;
   border-radius: 50px;
   width: 34px;
@@ -310,7 +377,7 @@ input {
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   transition: background 0.2s, transform 0.1s;
 }
 
@@ -319,15 +386,16 @@ input {
 }
 
 #add-button:active {
-  transform: scale(0.92); 
+  transform: scale(0.92);
 }
 
 #list {
   list-style: none;
   padding: 0;
   margin: 0;
-  max-height: 180px;
+  max-height: 320px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
@@ -339,14 +407,14 @@ input {
   padding: 10px 14px;
   background: var(--bg-color);
   border: 1px solid var(--border-color);
-  border-radius: 50px; 
+  border-radius: 50px;
   margin-bottom: 8px;
   font-size: 13px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 #list li:hover {
-  border-color: #c7c7cc;
+  border-color: var(--border-strong);
 }
 
 #list li span {
@@ -354,6 +422,7 @@ input {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-width: 0;
   margin-right: 8px;
 }
 
@@ -361,9 +430,14 @@ input {
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-shrink: 0;
 }
 
-.fav-btn, .edit-btn, .remove-btn, .save-edit-btn, .cancel-edit-btn {
+.fav-btn,
+.edit-btn,
+.remove-btn,
+.save-edit-btn,
+.cancel-edit-btn {
   background: transparent;
   border: none;
   padding: 0;
@@ -379,20 +453,20 @@ input {
   transition: background 0.2s, color 0.2s, transform 0.1s;
 }
 
-.fav-btn { color: #c7c7cc; }
-.fav-btn.active { color: var(--star-gold); }
-.fav-btn:hover { background: rgba(255, 204, 0, 0.12); color: #e6b800; }
+.fav-btn { color: var(--star-empty); }                                   /* [C3] */
+.fav-btn.active { color: var(--star-gold); }                             /* [C3] */
+.fav-btn:hover { background: rgba(184, 134, 11, 0.12); color: var(--star-gold); }
 
 .edit-btn { color: var(--text-secondary); }
-.edit-btn:hover { color: var(--apple-blue); background: rgba(0, 122, 255, 0.1); }
+.edit-btn:hover { color: var(--apple-blue-text); background: rgba(0, 122, 255, 0.1); }
 
 .remove-btn { color: var(--text-secondary); }
-.remove-btn:hover { color: var(--danger); background: rgba(255, 59, 48, 0.1); }
+.remove-btn:hover { color: var(--danger-text); background: rgba(255, 59, 48, 0.1); }
 
-.save-edit-btn { color: var(--success); }
+.save-edit-btn { color: var(--success-text); }
 .save-edit-btn:hover { background: rgba(52, 199, 89, 0.1); }
 
-.cancel-edit-btn { color: var(--danger); }
+.cancel-edit-btn { color: var(--danger-text); }
 .cancel-edit-btn:hover { background: rgba(255, 59, 48, 0.1); }
 
 .edit-input {
@@ -403,26 +477,77 @@ input {
   border-radius: 50px;
   margin-right: 8px;
   font-size: 13px;
-  outline: none;
   background: var(--bg-color);
+  color: var(--text-primary);
 }
 
-.adding { animation: slideIn 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards; }
-.removing { animation: slideOut 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards; pointer-events: none; }
+.adding {
+  animation: slideIn 0.45s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
 
-#add-button:disabled, input:disabled {
+.removing {
+  animation: slideOut 0.35s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#add-button:disabled,
+input:disabled,
+button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(-10px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes slideOut {
-  from { opacity: 1; transform: scale(1); max-height: 50px; margin-bottom: 8px; padding: 10px 14px; }
-  to { opacity: 0; transform: scale(0.95); max-height: 0; margin-bottom: 0; padding: 0 14px; border-width: 0; }
+  from { opacity: 1; transform: scale(1); max-height: 60px; margin-bottom: 8px; padding: 10px 14px; border-width: 1px; }
+  to   { opacity: 0; transform: scale(0.95); max-height: 0; margin-bottom: 0; padding: 0 14px; border-width: 0; }
 }
 
-#profile-info, #status, #empty-message { text-align: center; font-size: 12px; color: var(--text-secondary); }
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+#list,
+.category-menu-list,
+.category-dropdown {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+#profile-info,
+#status,
+#empty-message {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+#status {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  min-height: 1.2em;
+}
+
+#status.show {
+  opacity: 1;
+}
+
+#status.is-success { color: var(--success-text); }
+#status.is-error   { color: var(--danger-text); }
+
+.hidden,
+[hidden] {
+  display: none;
+}

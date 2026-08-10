@@ -3,6 +3,8 @@
 
 <head>
   <meta charset="UTF-8">
+  <!-- [H1] Informa ao Chrome que o popup suporta tema claro e escuro -->
+  <meta name="color-scheme" content="light dark">
   <title>Fillit</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -10,7 +12,8 @@
 <body>
 
   <header>
-    <img src="../../icons/icon16.png" alt="Fillit logo" class="logo">
+    <!-- [H2] Logo é decorativa: alt vazio evita leitura redundante ("Fillit logo" + h1 "Fillit") -->
+    <img src="../../icons/icon16.png" alt="" class="logo" width="24" height="24">
     <h1>Fillit</h1>
   </header>
 
@@ -18,39 +21,79 @@
     <div class="inline-row">
       <!-- Menu suspenso de categorias customizável -->
       <div id="category-select-container" class="category-select-container">
-        <button id="category-toggle-btn" type="button" class="category-toggle-btn">
+        <!-- [H3] ARIA do combobox: sem isso o leitor de tela anuncia só "botão Categorias",
+             sem informar que abre um menu nem se está aberto ou fechado. -->
+        <button id="category-toggle-btn" type="button" class="category-toggle-btn"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="category-list">
           <span id="category-selected-label">Categorias</span>
-          <span class="chevron">▾</span>
+          <span class="chevron" aria-hidden="true">▾</span>
         </button>
 
+        <!-- [H4] Estado inicial padronizado em class="hidden" (mesma convenção do
+             código original). Funciona com classList, com .hidden e com style.display. -->
         <div id="category-dropdown" class="category-dropdown hidden">
           <div class="add-category-box">
-            <input type="text" id="new-category-input" placeholder="Nome da categoria..." autocomplete="off">
-            <button id="add-category-btn" title="Criar categoria">＋</button>
+            <!-- [H5] aria-label: o placeholder some ao digitar e não é um rótulo acessível.
+                 maxlength evita gravar strings gigantes no chrome.storage. -->
+            <input type="text" id="new-category-input"
+                   placeholder="Nome da categoria..."
+                   aria-label="Nome da nova categoria"
+                   maxlength="40"
+                   autocomplete="off"
+                   spellcheck="false"
+                   enterkeyhint="done">
+            <button id="add-category-btn" type="button" title="Criar categoria" aria-label="Criar categoria">＋</button>
           </div>
 
-          <!-- Contêiner específico para os erros do menu suspenso -->
-          <div id="category-error-message" class="error-text" style="display: none;"></div>
+          <!-- [H6] role="alert" faz o leitor de tela anunciar o erro assim que ele aparece.
+               O style="display:none" inline saiu daqui: era a única ocultação do projeto
+               que NÃO respondia a classList.remove("hidden"). Ver item B2 do relatório. -->
+          <div id="category-error-message" class="error-text hidden" role="alert" aria-live="assertive"></div>
 
-          <div class="category-dropdown-header">Minhas Categorias</div>
-          <ul id="category-list" class="category-menu-list"></ul>
-          <div id="no-categories-msg" class="no-categories-msg">Vazio</div>
+          <div class="category-dropdown-header" id="category-list-label">Minhas Categorias</div>
+
+          <!-- [H7] role="listbox" + os <li> gerados pelo JS devem receber role="option"
+               e aria-selected="true|false" -->
+          <ul id="category-list" class="category-menu-list"
+              role="listbox"
+              aria-labelledby="category-list-label"
+              tabindex="-1"></ul>
+
+          <!-- [H10] Começa oculto: antes aparecia no primeiro paint, antes do JS decidir -->
+          <div id="no-categories-msg" class="no-categories-msg hidden">Vazio</div>
         </div>
       </div>
 
-      <input type="text" id="value" placeholder="Adicionar item..." autocomplete="off">
+      <!-- [H5] -->
+      <input type="text" id="value"
+             placeholder="Adicionar item..."
+             aria-label="Valor a salvar na categoria selecionada"
+             maxlength="500"
+             autocomplete="off"
+             enterkeyhint="done">
 
-      <button id="add-button" title="Salvar">＋</button>
+      <button id="add-button" type="button" title="Salvar" aria-label="Salvar item">＋</button>
     </div>
   </div>
 
-  <ul id="list"></ul>
-  <div id="empty-message">Nenhum dado salvo</div>
+  <!-- [H7] Rótulo para a lista principal -->
+  <ul id="list" aria-label="Itens salvos"></ul>
 
-  <div id="status"></div>
+  <!-- [H10] BUG B1 corrigido: sem class="hidden" este texto era pintado na tela
+       ANTES do script.js rodar, causando um flash de "Nenhum dado salvo" toda vez
+       que o popup abria — mesmo com itens salvos. Também ficava preso na tela se
+       o script.js falhasse. -->
+  <div id="empty-message" class="hidden">Nenhum dado salvo</div>
+
+  <!-- [H8] Live region: mensagens de status passam a ser anunciadas.
+       `polite` não interrompe o que o leitor de tela estiver falando. -->
+  <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
   <!-- <div id="profile-info"></div> -->
 
-  <script src="script.js"></script>
+  <!-- [H9] `defer` garante que o DOM esteja pronto mesmo se o script for movido para o <head> -->
+  <script src="script.js" defer></script>
 </body>
 
 </html>

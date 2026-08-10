@@ -1,3 +1,9 @@
+const ehFrameUtil = () =>
+  window.top === window.self || (window.innerWidth >= 60 && window.innerHeight >= 30);
+
+const FILLIT_DEBUG = false;
+const flog = (...a) => { if (FILLIT_DEBUG) console.log(...a); };
+
 let currentDropdown = null;
 let currentDropdownInput = null;
 let currentSelectedIndex = -1;
@@ -16,10 +22,12 @@ function markUserGesture() {
   lastUserGestureAt = Date.now();
 }
 
-document.addEventListener('pointerdown', markUserGesture, true);
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Tab') markUserGesture();
-}, true);
+if (ehFrameUtil()) {                                    // [IFRAME]
+  document.addEventListener('pointerdown', markUserGesture, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') markUserGesture();
+  }, true);
+}
 
 function normalizeText(text) {
   return text
@@ -39,13 +47,13 @@ function containsKeyword(haystack, keyword) {
 
 function identifyFieldTypes(input, categories = []) {
   const matchedTypes = new Set();
-  const autocomplete = (input.autocomplete || '').toLowerCase();
+  const autocomplete = (input.autocomplete || input.getAttribute?.('autocomplete') || '').toLowerCase();
 
   const parts = normalizeText(
     [
-      input.name,
+      input.name || input.getAttribute?.('name'),
       input.id,
-      input.placeholder,
+      input.placeholder || input.getAttribute?.('placeholder'),
       autocomplete,
       findContextualText(input)
     ]
@@ -115,19 +123,14 @@ function findContextualText(input) {
 function incrementUsageCount(suggestion) {
   if (!chrome.runtime?.id || !suggestion?.category) return;
 
-  chrome.storage.local.get(['fillit_values'], (result) => {
-    const fillitValues = result.fillit_values || {};
-    const items = fillitValues[suggestion.category];
-    if (!items) return;
-
-    const target = suggestion.id
-      ? items.find(item => item.id === suggestion.id)
-      : items.find(item => item.value === suggestion.value);
-    if (!target) return;
-
-    target.usageCount = (target.usageCount || 0) + 1;
-    chrome.storage.local.set({ fillit_values: fillitValues });
-  });
+  try {
+    chrome.runtime.sendMessage(
+      { type: 'fillit:increment-usage', category: suggestion.category, id: suggestion.id, value: suggestion.value },
+      () => { if (chrome.runtime.lastError) flog('Fillit:', chrome.runtime.lastError.message); }  // [L15]
+    );
+  } catch (error) {
+    flog('Fillit: não foi possível registrar o uso.', error);
+  }
 }
 
 function showDropdown(input, suggestions) {
@@ -145,7 +148,6 @@ function showDropdown(input, suggestions) {
       fontSize: '13px',
       overflowX: 'hidden',
       overflowY: 'auto',
-      maxHeight: '260px',
       minWidth: `${input.offsetWidth}px`
     });
 
@@ -153,14 +155,14 @@ function showDropdown(input, suggestions) {
     setStyleImportant(currentDropdown, 'color', '#1d1d1f');
     setStyleImportant(currentDropdown, 'border', '1px solid #ccc');
 
-    document.body.appendChild(currentDropdown);
+    const host = document.body || document.documentElement;
+    if (!host) { currentDropdown = null; return; }
+    host.appendChild(currentDropdown);
   }
 
   currentDropdown.innerHTML = '';
   currentSelectedIndex = -1;
   currentOptionEls = [];
-
-  repositionDropdown();
 
   const MAX_ITEMS = 100;
   const itemsToRender = suggestions.slice(0, MAX_ITEMS);
@@ -215,6 +217,7 @@ function showDropdown(input, suggestions) {
     setStyleImportant(hint, 'background-color', '#fafafa');
     currentDropdown.appendChild(hint);
   }
+  repositionDropdown();
 }
 
 function hideDropdown() {
@@ -291,6 +294,10 @@ function handleKeyboardNavigation(e) {
   } else if (e.key === 'Escape') closeDropdown();
 }
 
+const DROPDOWN_GAP = 4;
+const DROPDOWN_ALTURA_MAX = 260;
+const DROPDOWN_ALTURA_MIN = 56;
+
 function repositionDropdown() {
   if (!currentDropdown || !currentDropdownInput) return;
 
@@ -299,20 +306,63 @@ function repositionDropdown() {
   const isOffscreen = rect.bottom < 0 || rect.top > window.innerHeight;
   if (isOffscreen) return hideDropdown();
 
+  const abaixo = window.innerHeight - rect.bottom - DROPDOWN_GAP;
+  const acima = rect.top - DROPDOWN_GAP;
+
+  let direcao, maxAltura, topoViewport;
+
+  if (abaixo >= DROPDOWN_ALTURA_MIN) {
+    direcao = 'baixo';
+    maxAltura = abaixo;
+    topoViewport = rect.bottom + DROPDOWN_GAP;
+  } else if (acima >= DROPDOWN_ALTURA_MIN) {
+    direcao = 'cima';
+    maxAltura = acima;
+    topoViewport = null;
+  } else {
+    direcao = 'sobreposto';
+    maxAltura = Math.max(24, window.innerHeight - 2 * DROPDOWN_GAP);
+    topoViewport = DROPDOWN_GAP;
+  }
+
   currentDropdown.style.minWidth = `${currentDropdownInput.offsetWidth}px`;
-  currentDropdown.style.top = `${window.scrollY + rect.bottom + 4}px`;
-  currentDropdown.style.left = `${window.scrollX + rect.left}px`;
+  currentDropdown.style.maxHeight = `${Math.min(DROPDOWN_ALTURA_MAX, maxAltura)}px`;
+  currentDropdown.dataset.fillitDirecao = direcao;
+
+  const largura = currentDropdown.offsetWidth || currentDropdownInput.offsetWidth;
+  const maxLeft = Math.max(0, window.innerWidth - largura);
+  const left = Math.min(Math.max(0, rect.left), maxLeft);
+  currentDropdown.style.left = `${window.scrollX + left}px`;
+
+  if (direcao === 'cima')
+    topoViewport = rect.top - DROPDOWN_GAP - currentDropdown.offsetHeight;
+
+  currentDropdown.style.top = `${window.scrollY + topoViewport}px`;
 }
 
 function fillField(input, value) {
+  if (input.isContentEditable) {
+    input.focus();
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    const range = document.createRange();
+    range.selectNodeContents(input);
+    sel.addRange(range);
+    if (!document.execCommand('insertText', false, value)) {
+      input.textContent = value;
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    return;
+  }
+
   const prototype = input.tagName === 'TEXTAREA'
     ? window.HTMLTextAreaElement.prototype
     : window.HTMLInputElement.prototype;
 
-  Object
-    .getOwnPropertyDescriptor(prototype, 'value')
-    .set
-    .call(input, value);
+  const desc = Object.getOwnPropertyDescriptor(prototype, 'value');
+  if (desc?.set) desc.set.call(input, value);
+  else input.value = value;
 
   input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
   input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
@@ -340,20 +390,25 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('focusin', async (e) => {
+  if (!ehFrameUtil()) return;                           // [IFRAME]
+
   const input = getDeepActiveElement() || e.target;
 
-  if (!input || !['INPUT', 'TEXTAREA'].includes(input.tagName)) return;
+  const editavel = input && (['INPUT', 'TEXTAREA'].includes(input.tagName) || input.isContentEditable);
+  if (!editavel) return;
   if (input.tagName === 'INPUT' && ['button', 'submit', 'checkbox', 'radio', 'file', 'hidden', 'password'].includes(input.type)) return;
+
+  if ((input.getAttribute('autocomplete') || '').includes('password')) return;
 
   const isUserInitiated = (Date.now() - lastUserGestureAt) < GESTURE_WINDOW_MS;
   if (!isUserInitiated) return;
 
   if (!chrome.runtime?.id)
-    return console.log('Fillit: extension context invalidated. Refresh the page (F5) to reconnect.');
+    return flog('Fillit: extension context invalidated. Refresh the page (F5) to reconnect.');
 
   try {
-    chrome.storage.local.get(['fillit_values', 'fillit_categories', 'fillit_account_connected'], (result) => {
-      if (!result.fillit_account_connected) return;
+    chrome.storage.local.get(['fillit_values', 'fillit_categories'], (result) => {
+      if (chrome.runtime.lastError) return flog('Fillit:', chrome.runtime.lastError);
 
       const categories = result.fillit_categories || [];
       const types = identifyFieldTypes(input, categories);
@@ -364,9 +419,7 @@ document.addEventListener('focusin', async (e) => {
       let merged = [];
 
       types.forEach(type => {
-        (fillitValues[type] || []).forEach(item => {
-          merged.push({ ...item, category: type });
-        });
+        (fillitValues[type] || []).forEach(item => merged.push({ ...item, category: type }));
       });
 
       const seenValues = new Set();
@@ -391,7 +444,7 @@ document.addEventListener('focusin', async (e) => {
       }
     });
   } catch (error) {
-    console.log('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
+    flog('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
   }
 });
 
@@ -403,3 +456,5 @@ document.addEventListener('focusout', () => {
 });
 
 document.addEventListener('scroll', repositionDropdown, true);
+window.addEventListener('resize', repositionDropdown);
+window.addEventListener('blur', () => closeDropdown());

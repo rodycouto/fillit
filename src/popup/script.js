@@ -8,16 +8,25 @@ function generateId() {
 
 function isForbiddenCategoryName(name) {
   if (!name) return false;
-  
+
   const normalized = name
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-  const forbiddenRegex = /\b(senha|senhas|password|passwords|pass|pin|credencial|credenciais|secret|segredo|segredos|token|tokens)\b/i;
-  
+  const forbiddenRegex = /(senha|senhas|password|passwd|pwd|s3nha|pass|pin|credencial|credenciais|secret|segredo|segredos|token|tokens)/i;
+
   return forbiddenRegex.test(normalized);
+}
+
+function normalizeValue(text) {
+  return String(text)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
 }
 
 const getCategories = () =>
@@ -36,20 +45,34 @@ const saveCategories = categories =>
     });
   });
 
+const REV_KEY = 'fillit_rev';
+let lastReadRev = 0;
+
 const getValues = () =>
   new Promise((resolve, reject) => {
-    chrome.storage.local.get([STORAGE_KEY], result => {
+    chrome.storage.local.get([STORAGE_KEY, REV_KEY], result => {
       if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+      lastReadRev = result[REV_KEY] || 0;
       resolve(result[STORAGE_KEY] || {});
     });
   });
 
+class ConflitoDeVersao extends Error { }
+
 const saveValues = values =>
   new Promise((resolve, reject) => {
-    chrome.storage.local.set({ [STORAGE_KEY]: values }, () => {
-      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
-      resolve();
-    });
+    chrome.runtime.sendMessage(
+      { type: 'fillit:commit-values', values, rev: lastReadRev },
+      (response) => {
+        if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+        if (!response?.ok) {
+          if (response?.conflict) return reject(new ConflitoDeVersao());
+          return reject(new Error('Falha ao gravar'));
+        }
+        lastReadRev = response.rev;
+        resolve();
+      }
+    );
   });
 
 function saveLastCategory(categoryId) {
@@ -67,8 +90,17 @@ function getLastCategory() {
 }
 
 let storageQueue = Promise.resolve();
+
+async function comRetry(fn, tentativas = 3) {
+  for (let i = 0; i < tentativas; i++) {
+    try { return await fn(); }
+    catch (e) { if (!(e instanceof ConflitoDeVersao) || i === tentativas - 1) throw e; }
+  }
+}
+
 function runExclusive(fn) {
-  const run = storageQueue.then(fn, fn);
+  const tarefa = () => comRetry(fn);
+  const run = storageQueue.then(tarefa, tarefa);
   storageQueue = run.catch(() => { });
   return run;
 }
@@ -88,40 +120,53 @@ const addButton = document.getElementById('add-button');
 const list = document.getElementById('list');
 const emptyMessage = document.getElementById('empty-message');
 const status = document.getElementById('status');
-const profileInfo = document.getElementById('profile-info');
+
+function setHidden(el, oculto) {
+  if (!el) return;
+  el.classList.toggle('hidden', oculto);
+  el.hidden = oculto;
+  el.style.display = '';
+}
+
+function showEmptyMessage(visivel, texto) {
+  if (!emptyMessage) return;
+  if (texto !== undefined) emptyMessage.textContent = texto;
+  setHidden(emptyMessage, !visivel);
+}
 
 let timeoutValue = undefined;
 let categoryErrorTimeout = undefined;
-let accountConnected = false;
 let currentCategoryId = null;
 
 function showCategoryError(text) {
   if (!categoryErrorMsg) return;
   categoryErrorMsg.textContent = text;
-  categoryErrorMsg.style.display = 'block';
+  setHidden(categoryErrorMsg, false);
 
   clearTimeout(categoryErrorTimeout);
   categoryErrorTimeout = setTimeout(() => {
-    categoryErrorMsg.style.display = 'none';
+    setHidden(categoryErrorMsg, true);
     categoryErrorMsg.textContent = '';
     categoryErrorTimeout = undefined;
   }, 4000);
 }
 
+function syncDropdownAria() {
+  const aberto = !categoryDropdown.classList.contains('hidden');
+  if (categoryToggleBtn) categoryToggleBtn.setAttribute('aria-expanded', String(aberto));
+  return aberto;
+}
+
 function toggleCategoryDropdown() {
-  categoryDropdown.classList.toggle('hidden');
-  if (!categoryDropdown.classList.contains('hidden')) {
-    newCategoryInput.focus();
-  } else if (categoryErrorMsg) {
-    categoryErrorMsg.style.display = 'none';
-  }
+  setHidden(categoryDropdown, !categoryDropdown.classList.contains('hidden'));
+  if (syncDropdownAria()) newCategoryInput.focus();
+  else setHidden(categoryErrorMsg, true);
 }
 
 function closeCategoryDropdown() {
-  categoryDropdown.classList.add('hidden');
-  if (categoryErrorMsg) {
-    categoryErrorMsg.style.display = 'none';
-  }
+  setHidden(categoryDropdown, true);
+  syncDropdownAria();
+  setHidden(categoryErrorMsg, true);
 }
 
 async function renderCategoriesUI() {
@@ -138,9 +183,9 @@ async function renderCategoriesUI() {
 
   if (categories.length === 0) {
     categorySelectedLabel.textContent = 'Criar Categoria';
-    noCategoriesMsg.style.display = 'block';
+    setHidden(noCategoriesMsg, false);
   } else {
-    noCategoriesMsg.style.display = 'none';
+    setHidden(noCategoriesMsg, true);
     const activeCat = categories.find(c => c.id === currentCategoryId);
     categorySelectedLabel.textContent = activeCat ? activeCat.label : 'Selecionar';
   }
@@ -149,6 +194,8 @@ async function renderCategoriesUI() {
     const li = document.createElement('li');
     li.className = `category-item ${cat.id === currentCategoryId ? 'selected' : ''}`;
     li.dataset.id = cat.id;
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', String(cat.id === currentCategoryId));
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'cat-remove-btn';
@@ -201,17 +248,11 @@ async function renderCategoriesUI() {
 async function selectCategory(categoryId, closeDropdown = true) {
   currentCategoryId = categoryId;
   await saveLastCategory(categoryId);
-  
-  if (closeDropdown) {
-    closeCategoryDropdown();
-  }
 
+  if (closeDropdown) closeCategoryDropdown();
   await renderCategoriesUI();
   await renderList();
-
-  if (!closeDropdown && newCategoryInput) {
-    newCategoryInput.focus();
-  }
+  if (!closeDropdown && newCategoryInput) newCategoryInput.focus();
 }
 
 async function addCategory() {
@@ -219,16 +260,16 @@ async function addCategory() {
   if (!label) return;
 
   if (isForbiddenCategoryName(label)) {
-    return showCategoryError('O Fillit não salva senhas.');
+    return showCategoryError('O Fillit não salva senhas');
   }
 
   try {
     await runExclusive(async () => {
       const categories = await getCategories();
-      
+
       const alreadyExists = categories.some(c => c.label.toLowerCase() === label.toLowerCase());
       if (alreadyExists) {
-        return showCategoryError('Esta categoria já existe.');
+        return showCategoryError('Esta categoria já existe');
       }
 
       const newId = `cat_${generateId()}`;
@@ -241,18 +282,29 @@ async function addCategory() {
       await saveValues(values);
 
       newCategoryInput.value = '';
-      if (categoryErrorMsg) categoryErrorMsg.style.display = 'none';
+      setHidden(categoryErrorMsg, true);
       showStatus('Categoria criada!');
 
       await selectCategory(newId, false);
     });
   } catch (error) {
-    showCategoryError('Erro ao criar categoria.');
+    showCategoryError('Erro ao criar categoria');
   }
 }
 
 async function removeCategory(categoryId, e) {
   if (e) e.stopPropagation();
+
+  const categories = await getCategories();
+  const alvo = categories.find(c => c.id === categoryId);
+  const values = await getValues();
+  const qtd = (values[categoryId] || []).length;
+
+  const aviso = qtd > 0
+    ? `Excluir a categoria "${alvo?.label ?? ''}" e os ${qtd} ${qtd === 1 ? 'item salvo' : 'itens salvos'} nela?\n\nEsta ação não pode ser desfeita.`
+    : `Excluir a categoria "${alvo?.label ?? ''}"?`;
+
+  if (!confirm(aviso)) return;
 
   try {
     await runExclusive(async () => {
@@ -266,7 +318,7 @@ async function removeCategory(categoryId, e) {
         await saveValues(values);
       }
 
-      showStatus('Categoria excluída.');
+      showStatus('Categoria excluída');
 
       if (currentCategoryId === categoryId) {
         const nextCat = categories.length > 0 ? categories[0].id : null;
@@ -277,7 +329,7 @@ async function removeCategory(categoryId, e) {
       await renderList();
     });
   } catch (error) {
-    showStatus('Erro ao excluir categoria.', true);
+    showStatus('Erro ao excluir categoria', true);
   }
 }
 
@@ -314,9 +366,8 @@ function enterCategoryEditMode(li, cat) {
     const newLabel = editInput.value.trim();
     if (!newLabel) return;
 
-    if (isForbiddenCategoryName(newLabel)) {
-      return showCategoryError('O Fillit não salva senhas.');
-    }
+    if (isForbiddenCategoryName(newLabel))
+      return showCategoryError('O Fillit não salva senhas');
 
     try {
       await runExclusive(async () => {
@@ -330,7 +381,7 @@ function enterCategoryEditMode(li, cat) {
       });
       await renderCategoriesUI();
     } catch (error) {
-      showCategoryError('Erro ao editar categoria.');
+      showCategoryError('Erro ao editar categoria');
     }
   };
 
@@ -338,7 +389,7 @@ function enterCategoryEditMode(li, cat) {
     e.stopPropagation();
     save();
   });
-  
+
   cancelBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     renderCategoriesUI();
@@ -372,8 +423,8 @@ function reorderListDom(idsInOrder) {
 function showStatus(text, isError = false) {
   if (!status) return;
   status.textContent = text;
-  status.style.color = isError ? 'var(--danger)' : 'var(--success)';
-
+  status.classList.toggle('is-error', isError);
+  status.classList.toggle('is-success', !isError);
   status.classList.add('show');
 
   clearTimeout(timeoutValue);
@@ -389,11 +440,8 @@ function toggleButtonState() {
     const hasCategory = !!currentCategoryId;
     addButton.disabled = !hasCategory || valueInput.value.trim() === '';
     valueInput.disabled = !hasCategory;
-    if (!hasCategory) {
-      valueInput.placeholder = 'Crie uma categoria primeiro...';
-    } else {
-      valueInput.placeholder = 'Adicionar item...';
-    }
+    if (!hasCategory) valueInput.placeholder = 'Crie uma categoria primeiro...';
+    else valueInput.placeholder = 'Adicionar item...';
   }
 }
 
@@ -401,20 +449,14 @@ async function renderList() {
   try {
     if (!currentCategoryId) {
       list.innerHTML = '';
-      if (emptyMessage) {
-        emptyMessage.textContent = 'Crie uma categoria para começar';
-        emptyMessage.style.display = 'block';
-      }
+      showEmptyMessage(true, 'Crie uma categoria para começar');
       return;
     }
 
     const values = await getValues();
     const items = values[currentCategoryId] || [];
 
-    if (emptyMessage) {
-      emptyMessage.textContent = 'Nenhum dado salvo';
-      emptyMessage.style.display = items.length ? 'none' : 'block';
-    }
+    showEmptyMessage(items.length === 0, 'Nenhum dado salvo');
     list.innerHTML = '';
 
     const sortedItems = [...items].sort((a, b) => (b.favorite === true) - (a.favorite === true));
@@ -424,7 +466,7 @@ async function renderList() {
       list.appendChild(li);
     });
   } catch (error) {
-    showStatus('Erro ao carregar dados.', true);
+    showStatus('Erro ao carregar dados', true);
   }
 }
 
@@ -477,9 +519,8 @@ function updateLiContent(li, category, item) {
 }
 
 async function addValue() {
-  if (!currentCategoryId) {
-    return showStatus('Crie uma categoria primeiro.', true);
-  }
+  if (!currentCategoryId)
+    return showStatus('Crie uma categoria primeiro', true);
 
   const value = valueInput.value.trim();
   if (!value) return;
@@ -489,9 +530,10 @@ async function addValue() {
       const values = await getValues();
       if (!values[currentCategoryId]) values[currentCategoryId] = [];
 
-      const alreadyExists = values[currentCategoryId].some(item => item.value === value);
+      const key = normalizeValue(value);
+      const alreadyExists = values[currentCategoryId].some(item => normalizeValue(item.value) === key);
       if (alreadyExists)
-        return showStatus('Esse valor já está salvo.', true);
+        return showStatus('Esse valor já está salvo', true);
 
       const newItem = { id: generateId(), value, usageCount: 0, favorite: false };
       values[currentCategoryId].unshift(newItem);
@@ -501,7 +543,7 @@ async function addValue() {
       toggleButtonState();
       showStatus('Valor adicionado');
 
-      if (emptyMessage) emptyMessage.style.display = 'none';
+      showEmptyMessage(false);
 
       const li = createItemElement(currentCategoryId, newItem);
       li.classList.add('adding');
@@ -509,35 +551,36 @@ async function addValue() {
       reorderListDom(sortedIds(values[currentCategoryId]));
     });
   } catch (error) {
-    showStatus('Erro ao salvar valor.', true);
+    showStatus('Erro ao salvar valor', true);
   }
 }
 
 async function removeValue(category, id, liElement) {
-  if (liElement.classList.contains('removing')) return;
+  if (liElement.dataset.removing === '1') return;
+  liElement.dataset.removing = '1';
+
+  try {
+    await runExclusive(async () => {
+      const values = await getValues();
+      if (values[category]) {
+        values[category] = values[category].filter(item => item.id !== id);
+        await saveValues(values);
+      }
+    });
+  } catch (error) {
+    delete liElement.dataset.removing;
+    return showStatus('Erro ao remover item', true);
+  }
+
+  const finalizar = () => {
+    if (!liElement.isConnected) return;
+    liElement.remove();
+    if (list.children.length === 0 && emptyMessage) showEmptyMessage(true);
+  };
 
   liElement.classList.add('removing');
-
-  setTimeout(async () => {
-    try {
-      await runExclusive(async () => {
-        const values = await getValues();
-        if (values[category]) {
-          values[category] = values[category].filter(item => item.id !== id);
-          await saveValues(values);
-        }
-      });
-
-      liElement.remove();
-
-      if (list.children.length === 0 && emptyMessage) {
-        emptyMessage.style.display = 'block';
-      }
-    } catch (error) {
-      showStatus('Erro ao remover item.', true);
-      liElement.classList.remove('removing');
-    }
-  }, 600);
+  liElement.addEventListener('animationend', finalizar, { once: true });
+  setTimeout(finalizar, 1000);
 }
 
 async function toggleFavorite(category, id) {
@@ -551,14 +594,13 @@ async function toggleFavorite(category, id) {
       await saveValues(values);
 
       const li = list.querySelector(`li[data-id="${CSS.escape(id)}"]`);
-      if (li && !li.classList.contains('editing')) {
+      if (li && !li.classList.contains('editing'))
         updateLiContent(li, category, item);
-      }
 
       reorderListDom(sortedIds(values[category]));
     });
   } catch (error) {
-    showStatus('Erro ao atualizar favorito.', true);
+    showStatus('Erro ao atualizar favorito', true);
   }
 }
 
@@ -614,9 +656,10 @@ function enterEditMode(li, category, item) {
         const values = await getValues();
         if (cancelled || !values[category]) return;
 
-        const alreadyExists = values[category].some(i => i.id !== item.id && i.value === newValue);
+        const keyEdit = normalizeValue(newValue);
+        const alreadyExists = values[category].some(i => i.id !== item.id && normalizeValue(i.value) === keyEdit);
         if (alreadyExists)
-          return showStatus('Esse valor já está salvo.', true);
+          return showStatus('Esse valor já está salvo', true);
 
         const storedItem = values[category].find(i => i.id === item.id);
         if (!storedItem) return;
@@ -631,7 +674,7 @@ function enterEditMode(li, category, item) {
         showStatus('Item atualizado');
       });
     } catch (error) {
-      if (!cancelled) showStatus('Erro ao salvar item.', true);
+      if (!cancelled) showStatus('Erro ao salvar item', true);
     } finally {
       isSaving = false;
       if (!cancelled) {
@@ -664,9 +707,8 @@ if (categoryToggleBtn) {
   });
 }
 
-if (addCategoryBtn) {
+if (addCategoryBtn)
   addCategoryBtn.addEventListener('click', addCategory);
-}
 
 if (newCategoryInput) {
   newCategoryInput.addEventListener('keydown', e => {
@@ -675,9 +717,15 @@ if (newCategoryInput) {
 }
 
 document.addEventListener('click', (e) => {
-  if (categorySelectContainer && !categorySelectContainer.contains(e.target)) {
+  if (categorySelectContainer && !categorySelectContainer.contains(e.target))
     closeCategoryDropdown();
-  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (categoryDropdown.classList.contains('hidden')) return;
+  closeCategoryDropdown();
+  categoryToggleBtn?.focus();
 });
 
 if (addButton)
@@ -691,6 +739,7 @@ if (valueInput) {
 }
 
 async function init() {
+  syncDropdownAria();
   await renderCategoriesUI();
   await renderList();
 }
