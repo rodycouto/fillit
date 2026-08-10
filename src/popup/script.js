@@ -1,44 +1,46 @@
 const STORAGE_KEY = 'fillit_values';
+const CATEGORIES_KEY = 'fillit_categories';
 const LAST_CATEGORY_KEY = 'fillit_last_category';
-const DEFAULT_VALUES = { email: [], phone: [], name: [], cpf: [], cnpj: [], address: [], zipcode: [] };
 
 function generateId() {
   return (crypto.randomUUID) ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function saveLastCategory(category) {
-  chrome.storage.local.set({ [LAST_CATEGORY_KEY]: category });
+function isForbiddenCategoryName(name) {
+  if (!name) return false;
+  
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const forbiddenRegex = /\b(senha|senhas|password|passwords|pass|pin|credencial|credenciais|secret|segredo|segredos|token|tokens)\b/i;
+  
+  return forbiddenRegex.test(normalized);
 }
 
-const restoreLastCategory = () =>
-  new Promise(resolve => {
-    chrome.storage.local.get([LAST_CATEGORY_KEY], result => {
-      if (!chrome.runtime.lastError) {
-        const saved = result[LAST_CATEGORY_KEY];
-        if (categorySelect && saved && [...categorySelect.options].some(opt => opt.value === saved))
-          categorySelect.value = saved;
-      }
-
-      resolve();
+const getCategories = () =>
+  new Promise((resolve, reject) => {
+    chrome.storage.local.get([CATEGORIES_KEY], result => {
+      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+      resolve(result[CATEGORIES_KEY] || []);
     });
   });
 
-const categorySelect = document.getElementById('category');
-const valueInput = document.getElementById('value');
-const addButton = document.getElementById('add-button');
-const list = document.getElementById('list');
-const emptyMessage = document.getElementById('empty-message');
-const status = document.getElementById('status');
-const profileInfo = document.getElementById('profile-info');
-
-let timeoutValue = undefined;
-let accountConnected = false;
+const saveCategories = categories =>
+  new Promise((resolve, reject) => {
+    chrome.storage.local.set({ [CATEGORIES_KEY]: categories }, () => {
+      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+      resolve();
+    });
+  });
 
 const getValues = () =>
   new Promise((resolve, reject) => {
     chrome.storage.local.get([STORAGE_KEY], result => {
       if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
-      resolve(result[STORAGE_KEY] || DEFAULT_VALUES);
+      resolve(result[STORAGE_KEY] || {});
     });
   });
 
@@ -50,11 +52,303 @@ const saveValues = values =>
     });
   });
 
+function saveLastCategory(categoryId) {
+  return new Promise(resolve => {
+    chrome.storage.local.set({ [LAST_CATEGORY_KEY]: categoryId }, resolve);
+  });
+}
+
+function getLastCategory() {
+  return new Promise(resolve => {
+    chrome.storage.local.get([LAST_CATEGORY_KEY], result => {
+      resolve(result[LAST_CATEGORY_KEY] || null);
+    });
+  });
+}
+
 let storageQueue = Promise.resolve();
 function runExclusive(fn) {
   const run = storageQueue.then(fn, fn);
   storageQueue = run.catch(() => { });
   return run;
+}
+
+const categorySelectContainer = document.getElementById('category-select-container');
+const categoryToggleBtn = document.getElementById('category-toggle-btn');
+const categorySelectedLabel = document.getElementById('category-selected-label');
+const categoryDropdown = document.getElementById('category-dropdown');
+const categoryList = document.getElementById('category-list');
+const newCategoryInput = document.getElementById('new-category-input');
+const addCategoryBtn = document.getElementById('add-category-btn');
+const noCategoriesMsg = document.getElementById('no-categories-msg');
+const categoryErrorMsg = document.getElementById('category-error-message');
+
+const valueInput = document.getElementById('value');
+const addButton = document.getElementById('add-button');
+const list = document.getElementById('list');
+const emptyMessage = document.getElementById('empty-message');
+const status = document.getElementById('status');
+const profileInfo = document.getElementById('profile-info');
+
+let timeoutValue = undefined;
+let categoryErrorTimeout = undefined;
+let accountConnected = false;
+let currentCategoryId = null;
+
+function showCategoryError(text) {
+  if (!categoryErrorMsg) return;
+  categoryErrorMsg.textContent = text;
+  categoryErrorMsg.style.display = 'block';
+
+  clearTimeout(categoryErrorTimeout);
+  categoryErrorTimeout = setTimeout(() => {
+    categoryErrorMsg.style.display = 'none';
+    categoryErrorMsg.textContent = '';
+    categoryErrorTimeout = undefined;
+  }, 4000);
+}
+
+function toggleCategoryDropdown() {
+  categoryDropdown.classList.toggle('hidden');
+  if (!categoryDropdown.classList.contains('hidden')) {
+    newCategoryInput.focus();
+  } else if (categoryErrorMsg) {
+    categoryErrorMsg.style.display = 'none';
+  }
+}
+
+function closeCategoryDropdown() {
+  categoryDropdown.classList.add('hidden');
+  if (categoryErrorMsg) {
+    categoryErrorMsg.style.display = 'none';
+  }
+}
+
+async function renderCategoriesUI() {
+  const categories = await getCategories();
+  let lastCat = await getLastCategory();
+
+  if (!categories.some(c => c.id === lastCat)) {
+    lastCat = categories.length > 0 ? categories[0].id : null;
+    await saveLastCategory(lastCat);
+  }
+
+  currentCategoryId = lastCat;
+  categoryList.innerHTML = '';
+
+  if (categories.length === 0) {
+    categorySelectedLabel.textContent = 'Criar Categoria';
+    noCategoriesMsg.style.display = 'block';
+  } else {
+    noCategoriesMsg.style.display = 'none';
+    const activeCat = categories.find(c => c.id === currentCategoryId);
+    categorySelectedLabel.textContent = activeCat ? activeCat.label : 'Selecionar';
+  }
+
+  categories.forEach(cat => {
+    const li = document.createElement('li');
+    li.className = `category-item ${cat.id === currentCategoryId ? 'selected' : ''}`;
+    li.dataset.id = cat.id;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'cat-remove-btn';
+    removeBtn.title = 'Excluir categoria e seus itens';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', (e) => removeCategory(cat.id, e));
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'cat-label';
+    labelSpan.textContent = cat.label;
+
+    let clickTimer = null;
+    labelSpan.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (clickTimer) {
+        clearTimeout(clickTimer);
+        clickTimer = null;
+        enterCategoryEditMode(li, cat);
+      } else {
+        clickTimer = setTimeout(() => {
+          clickTimer = null;
+          selectCategory(cat.id, true);
+        }, 220);
+      }
+    });
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'cat-edit-btn';
+    editBtn.title = 'Editar nome';
+    editBtn.textContent = '✎';
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (clickTimer) {
+        clearTimeout(clickTimer);
+        clickTimer = null;
+      }
+      enterCategoryEditMode(li, cat);
+    });
+
+    li.appendChild(removeBtn);
+    li.appendChild(labelSpan);
+    li.appendChild(editBtn);
+
+    categoryList.appendChild(li);
+  });
+
+  toggleButtonState();
+}
+
+async function selectCategory(categoryId, closeDropdown = true) {
+  currentCategoryId = categoryId;
+  await saveLastCategory(categoryId);
+  
+  if (closeDropdown) {
+    closeCategoryDropdown();
+  }
+
+  await renderCategoriesUI();
+  await renderList();
+
+  if (!closeDropdown && newCategoryInput) {
+    newCategoryInput.focus();
+  }
+}
+
+async function addCategory() {
+  const label = newCategoryInput.value.trim();
+  if (!label) return;
+
+  if (isForbiddenCategoryName(label)) {
+    return showCategoryError('O Fillit não salva senhas.');
+  }
+
+  try {
+    await runExclusive(async () => {
+      const categories = await getCategories();
+      
+      const alreadyExists = categories.some(c => c.label.toLowerCase() === label.toLowerCase());
+      if (alreadyExists) {
+        return showCategoryError('Esta categoria já existe.');
+      }
+
+      const newId = `cat_${generateId()}`;
+      categories.push({ id: newId, label });
+
+      await saveCategories(categories);
+
+      const values = await getValues();
+      values[newId] = [];
+      await saveValues(values);
+
+      newCategoryInput.value = '';
+      if (categoryErrorMsg) categoryErrorMsg.style.display = 'none';
+      showStatus('Categoria criada!');
+
+      await selectCategory(newId, false);
+    });
+  } catch (error) {
+    showCategoryError('Erro ao criar categoria.');
+  }
+}
+
+async function removeCategory(categoryId, e) {
+  if (e) e.stopPropagation();
+
+  try {
+    await runExclusive(async () => {
+      let categories = await getCategories();
+      categories = categories.filter(c => c.id !== categoryId);
+      await saveCategories(categories);
+
+      const values = await getValues();
+      if (values[categoryId]) {
+        delete values[categoryId];
+        await saveValues(values);
+      }
+
+      showStatus('Categoria excluída.');
+
+      if (currentCategoryId === categoryId) {
+        const nextCat = categories.length > 0 ? categories[0].id : null;
+        await saveLastCategory(nextCat);
+      }
+
+      await renderCategoriesUI();
+      await renderList();
+    });
+  } catch (error) {
+    showStatus('Erro ao excluir categoria.', true);
+  }
+}
+
+function enterCategoryEditMode(li, cat) {
+  li.innerHTML = '';
+  li.classList.add('editing');
+
+  const editInput = document.createElement('input');
+  editInput.type = 'text';
+  editInput.className = 'cat-edit-input';
+  editInput.value = cat.label;
+
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'cat-edit-actions';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'cat-save-btn';
+  saveBtn.textContent = '✓';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'cat-cancel-btn';
+  cancelBtn.textContent = '✕';
+
+  actionsDiv.appendChild(saveBtn);
+  actionsDiv.appendChild(cancelBtn);
+
+  li.appendChild(editInput);
+  li.appendChild(actionsDiv);
+
+  editInput.focus();
+  editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+
+  const save = async () => {
+    const newLabel = editInput.value.trim();
+    if (!newLabel) return;
+
+    if (isForbiddenCategoryName(newLabel)) {
+      return showCategoryError('O Fillit não salva senhas.');
+    }
+
+    try {
+      await runExclusive(async () => {
+        const categories = await getCategories();
+        const categoryToUpdate = categories.find(c => c.id === cat.id);
+        if (categoryToUpdate) {
+          categoryToUpdate.label = newLabel;
+          await saveCategories(categories);
+          showStatus('Categoria atualizada');
+        }
+      });
+      await renderCategoriesUI();
+    } catch (error) {
+      showCategoryError('Erro ao editar categoria.');
+    }
+  };
+
+  saveBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    save();
+  });
+  
+  cancelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    renderCategoriesUI();
+  });
+
+  editInput.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') save();
+    if (e.key === 'Escape') renderCategoriesUI();
+  });
 }
 
 function sortedIds(items) {
@@ -91,18 +385,34 @@ function showStatus(text, isError = false) {
 }
 
 function toggleButtonState() {
-  if (addButton && valueInput)
-    addButton.disabled = valueInput.value.trim() === '';
-    // addButton.disabled = !accountConnected || valueInput.value.trim() === '';
+  if (addButton && valueInput) {
+    const hasCategory = !!currentCategoryId;
+    addButton.disabled = !hasCategory || valueInput.value.trim() === '';
+    valueInput.disabled = !hasCategory;
+    if (!hasCategory) {
+      valueInput.placeholder = 'Crie uma categoria primeiro...';
+    } else {
+      valueInput.placeholder = 'Adicionar item...';
+    }
+  }
 }
 
 async function renderList() {
   try {
-    const category = categorySelect.value;
+    if (!currentCategoryId) {
+      list.innerHTML = '';
+      if (emptyMessage) {
+        emptyMessage.textContent = 'Crie uma categoria para começar';
+        emptyMessage.style.display = 'block';
+      }
+      return;
+    }
+
     const values = await getValues();
-    const items = values[category] || [];
+    const items = values[currentCategoryId] || [];
 
     if (emptyMessage) {
+      emptyMessage.textContent = 'Nenhum dado salvo';
       emptyMessage.style.display = items.length ? 'none' : 'block';
     }
     list.innerHTML = '';
@@ -110,7 +420,7 @@ async function renderList() {
     const sortedItems = [...items].sort((a, b) => (b.favorite === true) - (a.favorite === true));
 
     sortedItems.forEach((item) => {
-      const li = createItemElement(category, item);
+      const li = createItemElement(currentCategoryId, item);
       list.appendChild(li);
     });
   } catch (error) {
@@ -167,37 +477,36 @@ function updateLiContent(li, category, item) {
 }
 
 async function addValue() {
-  // if (!accountConnected)
-  //   return showStatus('Conecte uma conta Google a este perfil do Chrome para adicionar itens.', true);
+  if (!currentCategoryId) {
+    return showStatus('Crie uma categoria primeiro.', true);
+  }
 
-  const category = categorySelect.value;
   const value = valueInput.value.trim();
   if (!value) return;
 
   try {
     await runExclusive(async () => {
       const values = await getValues();
-      if (!values[category]) values[category] = [];
+      if (!values[currentCategoryId]) values[currentCategoryId] = [];
 
-      const alreadyExists = values[category].some(item => item.value === value);
+      const alreadyExists = values[currentCategoryId].some(item => item.value === value);
       if (alreadyExists)
         return showStatus('Esse valor já está salvo.', true);
 
       const newItem = { id: generateId(), value, usageCount: 0, favorite: false };
-      values[category].unshift(newItem);
+      values[currentCategoryId].unshift(newItem);
       await saveValues(values);
 
       valueInput.value = '';
       toggleButtonState();
       showStatus('Valor adicionado');
 
-      if (categorySelect.value !== category) return;
       if (emptyMessage) emptyMessage.style.display = 'none';
 
-      const li = createItemElement(category, newItem);
+      const li = createItemElement(currentCategoryId, newItem);
       li.classList.add('adding');
       list.appendChild(li);
-      reorderListDom(sortedIds(values[category]));
+      reorderListDom(sortedIds(values[currentCategoryId]));
     });
   } catch (error) {
     showStatus('Erro ao salvar valor.', true);
@@ -231,38 +540,6 @@ async function removeValue(category, id, liElement) {
   }, 600);
 }
 
-async function showProfileInfo() {
-  if (!profileInfo) return;
-  try {
-    const userInfo = await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' });
-    accountConnected = !!userInfo.email;
-
-    profileInfo.textContent = accountConnected
-      ? `Dados do perfil ${userInfo.email}`
-      : 'Nenhum dado será salvo, pois nenhuma conta Google está conectada a este perfil do Chrome.';
-  } catch (error) {
-    accountConnected = false;
-    profileInfo.textContent = 'Conecte uma conta Google para salvar os dados neste perfil do Chrome.';
-  }
-
-  applyAccountGate();
-}
-
-function applyAccountGate() {
-  if (valueInput) {
-    valueInput.disabled = !accountConnected;
-    valueInput.placeholder = accountConnected
-      ? 'Adicionar item...'
-      : 'Conecte uma conta Google para adicionar';
-  }
-
-  if (profileInfo) {
-    profileInfo.style.color = accountConnected ? '' : 'var(--danger)';
-  }
-
-  toggleButtonState();
-}
-
 async function toggleFavorite(category, id) {
   try {
     await runExclusive(async () => {
@@ -278,8 +555,7 @@ async function toggleFavorite(category, id) {
         updateLiContent(li, category, item);
       }
 
-      if (categorySelect.value === category)
-        reorderListDom(sortedIds(values[category]));
+      reorderListDom(sortedIds(values[category]));
     });
   } catch (error) {
     showStatus('Erro ao atualizar favorito.', true);
@@ -381,26 +657,28 @@ function enterEditMode(li, category, item) {
   });
 }
 
-if (categorySelect) {
-  categorySelect.addEventListener('wheel', e => {
-    e.preventDefault();
-    const direction = e.deltaY > 0 ? 1 : -1;
-    let newIndex = categorySelect.selectedIndex + direction;
-
-    if (newIndex >= categorySelect.options.length)
-      newIndex = 0;
-    else if (newIndex < 0)
-      newIndex = categorySelect.options.length - 1;
-
-    categorySelect.selectedIndex = newIndex;
-    categorySelect.dispatchEvent(new Event('change'));
-  }, { passive: false });
-
-  categorySelect.addEventListener('change', () => {
-    saveLastCategory(categorySelect.value);
-    renderList();
+if (categoryToggleBtn) {
+  categoryToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleCategoryDropdown();
   });
 }
+
+if (addCategoryBtn) {
+  addCategoryBtn.addEventListener('click', addCategory);
+}
+
+if (newCategoryInput) {
+  newCategoryInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') addCategory();
+  });
+}
+
+document.addEventListener('click', (e) => {
+  if (categorySelectContainer && !categorySelectContainer.contains(e.target)) {
+    closeCategoryDropdown();
+  }
+});
 
 if (addButton)
   addButton.addEventListener('click', addValue);
@@ -413,10 +691,8 @@ if (valueInput) {
 }
 
 async function init() {
-  await restoreLastCategory();
-  renderList();
-  showProfileInfo();
-  toggleButtonState();
+  await renderCategoriesUI();
+  await renderList();
 }
 
 init();

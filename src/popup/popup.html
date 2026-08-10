@@ -10,33 +10,43 @@
 <body>
 
   <header>
-    <img src="../../icons/icon16.png" alt="Fillit logo" class="logo"> 
+    <img src="../../icons/icon16.png" alt="Fillit logo" class="logo">
     <h1>Fillit</h1>
   </header>
 
-<div class="input-card">
+  <div class="input-card">
     <div class="inline-row">
-      <div class="select-wrapper">
-        <select id="category">
-          <option value="email">Emails</option>
-          <option value="phone">Telefones</option>
-          <option value="name">Nomes</option>
-          <option value="cpf">CPFs</option>
-          <option value="cnpj">CNPJs</option>
-          <option value="address">Endereços</option>
-          <option value="zipcode">CEPs</option>
-        </select>
+      <!-- Menu suspenso de categorias customizável -->
+      <div id="category-select-container" class="category-select-container">
+        <button id="category-toggle-btn" type="button" class="category-toggle-btn">
+          <span id="category-selected-label">Categorias</span>
+          <span class="chevron">▾</span>
+        </button>
+
+        <div id="category-dropdown" class="category-dropdown hidden">
+          <div class="add-category-box">
+            <input type="text" id="new-category-input" placeholder="Nome da categoria..." autocomplete="off">
+            <button id="add-category-btn" title="Criar categoria">＋</button>
+          </div>
+
+          <!-- Contêiner específico para os erros do menu suspenso -->
+          <div id="category-error-message" class="error-text" style="display: none;"></div>
+
+          <div class="category-dropdown-header">Minhas Categorias</div>
+          <ul id="category-list" class="category-menu-list"></ul>
+          <div id="no-categories-msg" class="no-categories-msg">Vazio</div>
+        </div>
       </div>
 
       <input type="text" id="value" placeholder="Adicionar item..." autocomplete="off">
-      
+
       <button id="add-button" title="Salvar">＋</button>
     </div>
   </div>
 
   <ul id="list"></ul>
   <div id="empty-message">Nenhum dado salvo</div>
-  
+
   <div id="status"></div>
   <!-- <div id="profile-info"></div> -->
 

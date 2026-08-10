@@ -21,21 +21,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Tab') markUserGesture();
 }, true);
 
-const typeRules = {
-  email: ['email', 'e-mail', 'correio'],
-  phone: ['telefone', 'phone', 'celular', 'whatsapp', 'telefones'],
-  cpf: ['cpf'],
-  cnpj: ['cnpj'],
-  name: ['nome', 'name', 'fullname', 'nome-completo', 'username', 'apelido', 'sobrenome', 'first-name', 'last-name'],
-  address: ['endereco', 'endereço', 'address', 'rua', 'logradouro'],
-  zipcode: ['cep', 'zipcode', 'zip']
-};
-
 function normalizeText(text) {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, ''); 
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 function escapeRegExp(text) {
@@ -47,31 +37,10 @@ function containsKeyword(haystack, keyword) {
   return pattern.test(haystack);
 }
 
-const MASK_CHAR = '[\\d0-9#xX_]';
-const placeholderShapePatterns = {
-  zipcode: new RegExp(`^${MASK_CHAR}{5}\\s?-?\\s?${MASK_CHAR}{3}$`),
-  cpf: new RegExp(`^${MASK_CHAR}{3}\\.?${MASK_CHAR}{3}\\.?${MASK_CHAR}{3}\\s?-?\\s?${MASK_CHAR}{2}$`),
-  cnpj: new RegExp(`^${MASK_CHAR}{2}\\.?${MASK_CHAR}{3}\\.?${MASK_CHAR}{3}\\/?${MASK_CHAR}{4}\\s?-?\\s?${MASK_CHAR}{2}$`),
-  phone: new RegExp(`^\\(?${MASK_CHAR}{2}\\)?\\s?${MASK_CHAR}{4,5}\\s?-?\\s?${MASK_CHAR}{4}$`)
-};
-
-function matchPlaceholderShape(placeholder) {
-  if (!placeholder) return [];
-  const trimmed = placeholder.trim();
-  if (!trimmed) return [];
-
-  return Object.entries(placeholderShapePatterns)
-    .filter(([, pattern]) => pattern.test(trimmed))
-    .map(([type]) => type);
-}
-
-function identifyFieldTypes(input) {
+function identifyFieldTypes(input, categories = []) {
   const matchedTypes = new Set();
-
-  if (input.type === 'email') matchedTypes.add('email');
-  if (input.type === 'tel') matchedTypes.add('phone');
-
   const autocomplete = (input.autocomplete || '').toLowerCase();
+
   const parts = normalizeText(
     [
       input.name,
@@ -84,11 +53,17 @@ function identifyFieldTypes(input) {
       .join(' ')
   );
 
-  for (const [fieldType, keywords] of Object.entries(typeRules))
-    if (keywords.some(keyword => containsKeyword(parts, normalizeText(keyword))))
-      matchedTypes.add(fieldType);
+  categories.forEach(cat => {
+    if (!cat.label) return;
+    const normalizedLabel = normalizeText(cat.label);
 
-  matchPlaceholderShape(input.placeholder).forEach(fieldType => matchedTypes.add(fieldType));
+    if (input.type && normalizeText(input.type) === normalizedLabel)
+      matchedTypes.add(cat.id);
+
+    if (normalizedLabel.length >= 2 && containsKeyword(parts, normalizedLabel))
+      matchedTypes.add(cat.id);
+
+  });
 
   return Array.from(matchedTypes);
 }
@@ -313,9 +288,7 @@ function handleKeyboardNavigation(e) {
       const selected = items[currentSelectedIndex]._fillitSuggestion;
       if (selected) selectSuggestion(currentDropdownInput, selected);
     }
-  } else if (e.key === 'Escape') {
-    closeDropdown();
-  }
+  } else if (e.key === 'Escape') closeDropdown();
 }
 
 function repositionDropdown() {
@@ -361,9 +334,9 @@ document.addEventListener('input', (e) => {
     ? currentAllSuggestions.filter(suggestion => normalizeText(suggestion.value).includes(query))
     : currentAllSuggestions;
 
-  if (filtered.length > 0) {
+  if (filtered.length > 0)
     showDropdown(currentDropdownInput, filtered);
-  } else hideDropdown();
+  else hideDropdown();
 });
 
 document.addEventListener('focusin', async (e) => {
@@ -375,15 +348,17 @@ document.addEventListener('focusin', async (e) => {
   const isUserInitiated = (Date.now() - lastUserGestureAt) < GESTURE_WINDOW_MS;
   if (!isUserInitiated) return;
 
-  const types = identifyFieldTypes(input);
-  if (!types || types.length === 0) return;
-
   if (!chrome.runtime?.id)
     return console.log('Fillit: extension context invalidated. Refresh the page (F5) to reconnect.');
 
   try {
-    chrome.storage.local.get(['fillit_values', 'fillit_account_connected'], (result) => {
+    chrome.storage.local.get(['fillit_values', 'fillit_categories', 'fillit_account_connected'], (result) => {
       if (!result.fillit_account_connected) return;
+
+      const categories = result.fillit_categories || [];
+      const types = identifyFieldTypes(input, categories);
+
+      if (!types || types.length === 0) return;
 
       const fillitValues = result.fillit_values || {};
       let merged = [];
