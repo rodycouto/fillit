@@ -22,7 +22,7 @@ function markUserGesture() {
   lastUserGestureAt = Date.now();
 }
 
-if (ehFrameUtil()) {                                    // [IFRAME]
+if (ehFrameUtil()) {
   document.addEventListener('pointerdown', markUserGesture, true);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') markUserGesture();
@@ -126,7 +126,7 @@ function incrementUsageCount(suggestion) {
   try {
     chrome.runtime.sendMessage(
       { type: 'fillit:increment-usage', category: suggestion.category, id: suggestion.id, value: suggestion.value },
-      () => { if (chrome.runtime.lastError) flog('Fillit:', chrome.runtime.lastError.message); }  // [L15]
+      () => { if (chrome.runtime.lastError) flog('Fillit:', chrome.runtime.lastError.message); }
     );
   } catch (error) {
     flog('Fillit: não foi possível registrar o uso.', error);
@@ -390,7 +390,7 @@ document.addEventListener('input', (e) => {
 });
 
 document.addEventListener('focusin', async (e) => {
-  if (!ehFrameUtil()) return;                           // [IFRAME]
+  if (!ehFrameUtil()) return;
 
   const input = getDeepActiveElement() || e.target;
 

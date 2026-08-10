@@ -87,8 +87,6 @@ async function migrateStorage() {
 }
 
 let menuQueue = Promise.resolve();
-
-// [L3/L3b] Fila única de escrita do service worker.
 let writeQueue = Promise.resolve();
 const runExclusive = fn => (writeQueue = writeQueue.then(fn, fn).catch(() => { }));
 
