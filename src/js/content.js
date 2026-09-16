@@ -129,7 +129,7 @@ function incrementUsageCount(suggestion) {
       () => { if (chrome.runtime.lastError) flog('Fillit:', chrome.runtime.lastError.message); }
     );
   } catch (error) {
-    flog('Fillit: não foi possível registrar o uso.', error);
+    flog('Fillit: Can\'t increment usage count', error);
   }
 }
 
@@ -404,7 +404,7 @@ document.addEventListener('focusin', async (e) => {
   if (!isUserInitiated) return;
 
   if (!chrome.runtime?.id)
-    return flog('Fillit: extension context invalidated. Refresh the page (F5) to reconnect.');
+    return flog('Fillit: extension context invalidated. Refresh the page (F5) to reconnect');
 
   try {
     chrome.storage.local.get(['fillit_values', 'fillit_categories'], (result) => {
@@ -444,7 +444,7 @@ document.addEventListener('focusin', async (e) => {
       }
     });
   } catch (error) {
-    flog('Fillit: failed to read storage. Refresh the page (F5) to reconnect.', error);
+    flog('Fillit: failed to read storage. Refresh the page (F5) to reconnect', error);
   }
 });
 
